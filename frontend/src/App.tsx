@@ -16,6 +16,10 @@ import { SplitTool } from './components/SplitTool'
 import { StampTool } from './components/StampTool'
 import { SignatureTool } from './components/SignatureTool'
 import { TextTool } from './components/TextTool'
+import { WorkflowTool } from './components/WorkflowTool'
+import { BookmarksTool } from './components/BookmarksTool'
+import { FormsTool } from './components/FormsTool'
+import { RedactTool } from './components/RedactTool'
 
 export default function App() {
   const [tool, setTool] = useState<ToolId>(() => loadTool(TOOL_IDS, 'merge'))
@@ -77,11 +81,20 @@ export default function App() {
           <section id="panel-organize" role="tabpanel" aria-labelledby="tab-organize" hidden={tool !== 'organize'}>
             <OrganizeTool active={tool === 'organize'} />
           </section>
+          <section id="panel-bookmarks" role="tabpanel" aria-labelledby="tab-bookmarks" hidden={tool !== 'bookmarks'}>
+            <BookmarksTool active={tool === 'bookmarks'} />
+          </section>
           <section id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden={tool !== 'text'}>
             <TextTool active={tool === 'text'} />
           </section>
           <section id="panel-edit" role="tabpanel" aria-labelledby="tab-edit" hidden={tool !== 'edit'}>
             <EditTool active={tool === 'edit'} />
+          </section>
+          <section id="panel-forms" role="tabpanel" aria-labelledby="tab-forms" hidden={tool !== 'forms'}>
+            <FormsTool active={tool === 'forms'} />
+          </section>
+          <section id="panel-redact" role="tabpanel" aria-labelledby="tab-redact" hidden={tool !== 'redact'}>
+            <RedactTool active={tool === 'redact'} />
           </section>
           <section id="panel-signatures" role="tabpanel" aria-labelledby="tab-signatures" hidden={tool !== 'signatures'}>
             <SignatureTool active={tool === 'signatures'} />
@@ -97,6 +110,9 @@ export default function App() {
           </section>
           <section id="panel-passwords" role="tabpanel" aria-labelledby="tab-passwords" hidden={tool !== 'passwords'}>
             <PasswordTool active={tool === 'passwords'} />
+          </section>
+          <section id="panel-workflows" role="tabpanel" aria-labelledby="tab-workflows" hidden={tool !== 'workflows'}>
+            <WorkflowTool active={tool === 'workflows'} />
           </section>
           <section id="panel-images" role="tabpanel" aria-labelledby="tab-images" hidden={tool !== 'images'}>
             <ImagesTool active={tool === 'images'} />

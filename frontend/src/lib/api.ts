@@ -5,6 +5,7 @@ import { pdfPassword, rememberPdfPassword } from './passwords'
 import type { StampSettings } from './stamps'
 import { effectiveImageLayout, type ImagePdfLayout } from './imageLayout'
 import type { PageLayout } from './organize'
+import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } from './documentTools'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -45,6 +46,39 @@ function pdfBody(file: File): FormData {
   return body
 }
 
+async function inspectPdf<T>(path: string, file: File, signal?: AbortSignal): Promise<T> {
+  let response: Response
+  try { response = await fetch(path, { method: 'POST', body: pdfBody(file), signal }) }
+  catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
+  if (!response.ok) {
+    const value = await response.json().catch(() => null) as { detail?: string } | null
+    throw new Error(typeof value?.detail === 'string' ? value.detail : `Could not read PDF information (HTTP ${response.status}).`)
+  }
+  return response.json() as Promise<T>
+}
+export const readForms = (file: File, signal?: AbortSignal) => inspectPdf<FormSchema>('/api/forms/read', file, signal)
+export const readBookmarks = (file: File, signal?: AbortSignal) => inspectPdf<BookmarkSchema>('/api/bookmarks/read', file, signal)
+export function fillForms(file: File, values: Record<string, FormValue>, flatten: boolean, signal?: AbortSignal): Promise<File> {
+  const body = pdfBody(file)
+  body.append('values', JSON.stringify(values)); body.append('flatten', String(flatten))
+  return post('/api/forms/fill', body, 'filled.pdf', pdfPassword(file), signal)
+}
+export function writeBookmarks(file: File, entries: readonly BookmarkEntry[], signal?: AbortSignal): Promise<File> {
+  const body = pdfBody(file); body.append('entries', JSON.stringify(entries))
+  return post('/api/bookmarks', body, 'bookmarks.pdf', pdfPassword(file), signal)
+}
+export async function rebuildRedactedPdf(source: File, pages: File[], sizes: PdfSize[], signal?: AbortSignal): Promise<File> {
+  const body = new FormData()
+  for (const page of pages) body.append('pages', page)
+  body.append('sizes', JSON.stringify(sizes))
+  const password = pdfPassword(source)
+  if (password) body.append('password', password)
+  const output = await post('/api/redact', body, 'redacted.pdf', password, signal)
+  const file = new File([output], `${source.name.replace(/\.pdf$/i, '')}_redacted.pdf`, { type: 'application/pdf' })
+  rememberPdfPassword(file, password)
+  return file
+}
+
 export function mergePdfs(files: File[]): Promise<File> {
   const body = new FormData()
   for (const f of files) body.append('files', f)
@@ -61,10 +95,10 @@ export function splitPdf(file: File, mode: SplitMode, ranges: string): Promise<F
   return post('/api/split', body, 'split.pdf', pdfPassword(file))
 }
 
-export function protectPdf(file: File, newPassword: string): Promise<File> {
+export function protectPdf(file: File, newPassword: string, signal?: AbortSignal): Promise<File> {
   const body = pdfBody(file)
   body.append('new_password', newPassword)
-  return post('/api/protect', body, 'protected.pdf', newPassword)
+  return post('/api/protect', body, 'protected.pdf', newPassword, signal)
 }
 
 export function unlockPdf(file: File): Promise<File> {

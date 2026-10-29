@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import core, fonts, signatures
+from pdfer import bookmarks, core, fonts, forms, redactions, signatures
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -91,6 +91,42 @@ def _download(data: bytes, filename: str, media_type: str) -> Response:
     ascii_name = filename.encode("ascii", "replace").decode().replace('"', "")
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
     return Response(data, media_type=media_type, headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
+
+
+@app.post("/api/forms/read")
+def read_forms(file: UploadFile, password: Annotated[str, Form()] = "") -> Response:
+    return JSONResponse(forms.read(file.file.read(), file.filename or "document.pdf", password), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/forms/fill")
+def fill_forms(file: UploadFile, values: Annotated[str, Form()], flatten: Annotated[bool, Form()] = False, password: Annotated[str, Form()] = "") -> Response:
+    return _download(forms.fill(file.file.read(), values, flatten, file.filename or "document.pdf", password), f"{_stem(file.filename)}_filled.pdf", "application/pdf")
+
+
+@app.post("/api/bookmarks/read")
+def read_bookmarks(file: UploadFile, password: Annotated[str, Form()] = "") -> Response:
+    return JSONResponse(bookmarks.read(file.file.read(), file.filename or "document.pdf", password), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/bookmarks")
+def write_bookmarks(file: UploadFile, entries: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
+    return _download(bookmarks.write(file.file.read(), entries, file.filename or "document.pdf", password), f"{_stem(file.filename)}_bookmarks.pdf", "application/pdf")
+
+
+@app.post("/api/redact")
+def redact(pages: Annotated[list[UploadFile], File()], sizes: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
+    if len(pages) > 1000:
+        raise core.PdfToolError("Split documents longer than 1000 pages before redacting.")
+    data = []
+    total = 0
+    for page in pages:
+        limit = min(redactions.MAX_IMAGE_BYTES, redactions.MAX_TOTAL_BYTES - total)
+        image = page.file.read(limit + 1)
+        if len(image) > limit:
+            raise core.PdfToolError("The rendered pages are too large. Use a lower resolution or split the PDF first.")
+        total += len(image)
+        data.append(image)
+    return _download(redactions.rebuild(data, sizes, password), "redacted.pdf", "application/pdf")
 
 
 def _stem(filename: str | None) -> str:

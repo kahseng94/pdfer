@@ -54,6 +54,116 @@ order, selection or settings clears the old preview. Preview generation
 can be cancelled, and protected inputs keep their opening password.
 **Reset all changes** restores the original page order, rotation and size.
 
+### Fill PDF forms
+
+Use **Fill forms** to edit existing standard AcroForm fields: single-line
+or multiline text, checkboxes, radio groups, and single-select dropdowns
+or list boxes. Editable dropdowns also accept custom text. Fields repeated
+across pages share one value, and every associated widget is updated.
+Read-only and unsupported fields are clearly marked. Required labels are
+informational; partially completed forms can be saved.
+
+**Show page** opens the original page for context. **Preview filled PDF**
+generates the actual output before download. The copy stays interactive
+by default. Enable **Flatten form fields** to make fields static while
+retaining other annotations and links. Text appearances use embedded sans
+fonts and fit within each field; a value that cannot fit is rejected rather
+than silently truncated. Changed values, their field-tree entries and all
+widget appearances are kept consistent.
+
+XFA, multiselect choices, password/file-select/rich-text fields, and digital
+signing are not supported. PDFs with existing digital signatures must be
+replaced by an unsigned copy before filling or flattening. Malformed form
+trees are rejected rather than guessed at. Protected inputs retain their
+opening password. This tool fills existing fields; use **Edit** to place
+text on a flat form.
+
+### Bookmarks
+
+Use **Bookmarks** to add, rename, remove and reorder document bookmarks.
+Move up/down carries a whole section with its children. **Indent** creates
+a subsection; **Outdent** moves a subsection after its parent's remaining
+children. Removing a section removes its descendants; **Reset changes**
+restores the original outline.
+
+Choose destination pages or use **Browse document pages** and add a bookmark
+for the current page. Existing named destinations, zoom/page positions,
+external actions, and styles are retained when a bookmark is only renamed
+or moved. Selecting a different destination replaces it with a page link.
+An unresolved or external destination is shown as **Keep existing action**.
+The app does not execute those actions. Preview the generated PDF, then
+download the exact result or pass it to another tool. Up to 2000 bookmarks
+and 17 nesting levels are supported; protected copies keep their password.
+
+### Permanent redaction
+
+Use **Redact** to mark rectangles on the displayed PDF pages. Drag to mark
+an area, or use **Add area with controls** and enter its left/top/width/height
+in physical points. Areas can be adjusted or removed, and **Undo last area**
+or **Clear all areas** resets selections. Rotation, cropping and PDF page
+scaling are handled in the same visible coordinate system as the preview.
+
+**Build permanently redacted PDF** renders every page, paints opaque black
+pixels over marked areas, then builds a new PDF containing only those page
+images. It does not copy any original PDF objects. Original text layers,
+form fields, bookmarks, links, attachments and metadata are therefore absent
+from the output. Visible unmarked content remains as pixels. The original
+file is preserved, and the new copy retains its opening password.
+
+This is an **image-based redaction export**: text selection/search and
+interactive features are lost on all pages. It does not perform OCR.
+Choose 72, 150 (default), or 300 DPI to trade file size for sharpness. Inspect
+the actual output preview before downloading. Changes invalidate old
+previews, and cancellation never offers a partial PDF. Up to 1000 pages and
+2000 areas are supported, with limits on pixel and file sizes; use a lower
+resolution or split large documents when necessary.
+
+### Saved workflow presets
+
+Use **Workflows** to run the same sequence on several PDFs. The initial
+example is **Watermark → Compress → Password protection**. Add, remove or
+move steps up and down to build a sequence of up to eight operations:
+
+- **Watermark:** text, opacity, position, font, size, color, margin and rotation.
+- **Page numbers:** number format, starting number, document/selected-page
+  numbering, position and appearance. Numbering restarts for each PDF.
+- **Compress:** Light, Balanced or Strong.
+- **Password protection:** add or change the opening password for every
+  output PDF. A workflow can contain one protection step, in any position.
+
+Watermarks and page numbers can target all pages or ranges such as `2-5, 8-`.
+All-page scopes adapt to each PDF's length. Explicit ranges are checked
+against every input before processing begins.
+
+Give a workflow a name and press **Save preset**. Choose a saved preset to
+load it; **Update preset** saves changed settings or a new name. **Save as
+new preset** keeps a separate version under a different name. **Delete
+preset** has an undo action. You can also run the current steps without
+saving. Up to 50 presets are kept in this browser for the app's current
+address, across refreshes and app restarts. A different port or browser has
+its own preset library. Storage failures are reported instead of claiming
+that a save succeeded.
+
+Presets contain only names and step settings. PDFs and passwords are never
+stored in them. Protected inputs prompt for their own passwords when added.
+If the workflow includes protection, enter and confirm one output password
+for that run. Its input fields clear after completion, cancellation or a
+processing error. Passwords needed to open current files and results stay
+in memory for this session so later steps and tool handoffs keep working.
+Without a protection step, each PDF retains its input opening password.
+
+Add the PDFs and press **Run workflow**. Processing runs one file and one
+step at a time, with progress for both. Each step receives the previous
+step's result. A failure stops the batch and identifies the file and step;
+cancelled or failed runs never offer a partial download. Changing inputs
+or settings clears old results and cancels an active run.
+
+Completed batches offer one `<source>_processed.pdf` per input, with unique
+names for duplicate filenames. Multiple results also get a ZIP containing
+those exact PDFs. Preview individual files and pages, download a PDF, or
+send it directly to another tool. Downloading always requires an explicit
+click. Presets persist; open inputs, results and unfinished runs do not.
+
 ### Search and extract text
 
 Open **Search & text** and choose a PDF, drop one anywhere on the tab, or
@@ -247,12 +357,15 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/core.py      merge / split / organize / edit / compress (PDFs and images) / images / photo / spec parsing, no web code
   src/pdfer/fonts.py     the embedded fonts for text edits: registry, subsetting, PDF font objects
   src/pdfer/signatures.py local persistent signature-image library
+  src/pdfer/forms.py     canonical AcroForm values, widget appearances and flattening
+  src/pdfer/bookmarks.py outline reading/editing with preserved destinations
+  src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
   src/pdfer/fonts/       DejaVu Sans, Serif and Sans Mono; add .ttf files here for more scripts
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), TextTool (+ TextPage), EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
-  src/lib/               API client, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), WorkflowTool (+ WorkflowSteps, WorkflowResults), EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
 ```
 
 New PDF features go in `core.py` first, then get an endpoint in `api.py`.
@@ -262,6 +375,9 @@ Batch PDF compression calls the existing `/api/compress` endpoint sequentially,
 with each file's password, and packages the returned PDFs locally with `fflate`.
 Text search and TXT export use the existing pdf.js parser and text layer in
 the browser, so no backend endpoint or OCR dependency is needed.
+Workflows compose the existing stamp, compress and protect endpoints. Presets
+use a validated, versioned browser-storage record; run credentials are kept
+separate. Results are packaged locally with `fflate` after every file succeeds.
 
 ## API
 
@@ -270,6 +386,11 @@ the browser, so no backend endpoint or OCR dependency is needed.
 | `POST /api/merge` | `files` (2 or more, in order), optional `passwords` | `merged.pdf` |
 | `POST /api/split` | `file`, `mode`, `ranges`, optional `password` | a PDF, or a zip if there are several outputs |
 | `POST /api/organize` | `file`, `pages`, optional `layout` (JSON), optional `password` | `<name>_organized.pdf`, used for preview and download |
+| `POST /api/forms/read` | `file`, optional `password` | field IDs, values, types, options, page locations and read-only/signature status |
+| `POST /api/forms/fill` | `file`, `values` (JSON object keyed by field ID), optional `flatten` (default false), optional `password` | `<name>_filled.pdf` |
+| `POST /api/bookmarks/read` | `file`, optional `password` | bookmark titles, source IDs, destination pages and nesting levels |
+| `POST /api/bookmarks` | `file`, `entries` (JSON array), optional `password` | `<name>_bookmarks.pdf` |
+| `POST /api/redact` | `pages` (already-masked PNG images), `sizes` (JSON array of physical width/height in points), optional output `password` | a new image-only PDF; the browser names it `<name>_redacted.pdf` |
 | `POST /api/edit` | `file`, `edits`, `images` (0 or more), optional `password` | `<name>_edited.pdf` |
 | `GET /api/signatures` | | metadata for locally saved signature images |
 | `POST /api/signatures/prepare` | `file`, optional `remove_white` | prepared PNG with `X-Image-Width` and `X-Image-Height` |
