@@ -1,0 +1,11 @@
+@import 'tailwindcss';
+
+.signature-checker {
+  background-color: white;
+  background-image: conic-gradient(#e4e4e7 25%, transparent 0 50%, #e4e4e7 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+
+:root {
+  color-scheme: light dark;
+}

@@ -1,0 +1,33 @@
+[project]
+name = "pdfer"
+version = "0.1.0"
+description = "Local PDF tools: merge, split, organize, edit, compress PDFs and images, images to PDF, and passport photos"
+authors = [
+    { name = "Jayson Ng", email = "kahseng94@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.143.3",
+    "fonttools>=4.67.0",
+    "img2pdf>=0.6.3",
+    "pikepdf>=10.17.0",
+    "pillow>=13.0.0",
+    "python-multipart>=0.0.32",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+pdfer = "pdfer.api:main"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

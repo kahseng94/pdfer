@@ -1,0 +1,16 @@
+{
+  "name": "pdfer",
+  "private": true,
+  "scripts": {
+    "postinstall": "uv --directory backend sync",
+    "dev": "concurrently -n api,web -c blue,magenta \"pnpm:dev:api\" \"pnpm:dev:web\"",
+    "dev:api": "uv --directory backend run uvicorn pdfer.api:app --reload --host 127.0.0.1 --port 8000",
+    "dev:web": "pnpm --filter pdfer-frontend dev",
+    "start": "pnpm --filter pdfer-frontend build && uv --directory backend run pdfer",
+    "test": "uv --directory backend run pytest -q && pnpm --filter pdfer-frontend test"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  },
+  "packageManager": "pnpm@11.9.0"
+}
