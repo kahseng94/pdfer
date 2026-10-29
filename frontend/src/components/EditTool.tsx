@@ -20,6 +20,9 @@ import { usePdfLoader } from '../lib/usePdfLoader'
 import { useEditHistory } from '../lib/useEditHistory'
 import { useResult } from '../lib/result'
 import { useWindowDrop } from '../lib/windowDrop'
+import { checkProjectPages, type ProjectDraft, type ProjectStates } from '../lib/projects'
+import { useProject } from '../lib/useProject'
+import { ProjectControls } from './ProjectControls'
 import { Dropzone } from './Dropzone'
 import { EditPage, type Editor, type PageSize } from './EditPage'
 import {
@@ -68,6 +71,8 @@ export function EditTool({ active = true }: { active?: boolean }) {
   const [tool, setTool] = useState<Tool>('select')
   const [style, setStyle] = useState<Style>(DEFAULT_STYLE)
   const [zoomLevel, setZoomLevel] = useState(1)
+  const draft = useMemo<ProjectDraft<'edit'> | null>(() => file && doc ? { tool: 'edit', file, state: { elements, style, zoom: zoomLevel } } : null, [file, doc, elements, style, zoomLevel])
+  const project = useProject('edit', draft, elements.length > 0, (saved) => open(saved.file, saved.state))
   // The embedded fonts, for text beyond the standard ones; previews re-measure once they are in.
   const [fontState, setFontState] = useState<'loading' | 'ready' | 'failed'>('loading')
 
@@ -77,6 +82,13 @@ export function EditTool({ active = true }: { active?: boolean }) {
   const imageInput = useRef<HTMLInputElement>(null)
   // Object URLs of the pictures added, released when the file is closed.
   const urls = useRef<string[]>([])
+  const sourceDoc = useRef<PDFDocumentProxy | null>(null)
+  useEffect(() => () => {
+    opening.current += 1
+    closePdf(sourceDoc.current)
+    for (const url of urls.current) URL.revokeObjectURL(url)
+    urls.current = []
+  }, [])
 
   const editor = useMemo<Editor>(
     () => ({
@@ -94,7 +106,8 @@ export function EditTool({ active = true }: { active?: boolean }) {
 
   function close() {
     loader.cancel()
-    closePdf(doc)
+    closePdf(sourceDoc.current)
+    sourceDoc.current = null
     opening.current += 1
     for (const url of urls.current) URL.revokeObjectURL(url)
     urls.current = []
@@ -107,15 +120,17 @@ export function EditTool({ active = true }: { active?: boolean }) {
     setError(null)
   }
 
-  async function open(next: File) {
+  async function open(next: File, saved?: ProjectStates['edit']): Promise<boolean> {
     close()
     setFile(next)
     const version = opening.current
+    let loaded: PDFDocumentProxy | null = null
     try {
-      const loaded = await loader.load(next)
+      loaded = await loader.load(next)
+      if (saved) checkProjectPages(saved, loaded.numPages)
       const sizes = await Promise.all(
         Array.from({ length: loaded.numPages }, (_, i) =>
-          loaded.getPage(i + 1).then((page) => {
+          loaded!.getPage(i + 1).then((page) => {
             const { width, height } = page.getViewport({ scale: 1 })
             return { width, height }
           }),
@@ -123,16 +138,27 @@ export function EditTool({ active = true }: { active?: boolean }) {
       )
       if (opening.current !== version) {
         closePdf(loaded)
-        return
+        return false
       }
       setDoc(loaded)
+      sourceDoc.current = loaded
       setPages(sizes)
+      if (saved) {
+        history.reset(saved.elements)
+        setStyle(saved.style); setZoomLevel(saved.zoom)
+        urls.current = [...new Set(saved.elements.flatMap((element) => element.type === 'image' ? [element.url] : []))]
+      }
+      return true
     } catch (err) {
+      closePdf(loaded)
       if (opening.current === version) setError((err as Error).message)
+      return false
     }
   }
 
   function chooseAnother() {
+    if (!project.canReplace()) return
+    project.reset()
     close()
     setFile(null)
   }
@@ -215,6 +241,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
   }
 
   async function addImages(files: File[]) {
+    const version = opening.current
     const page = currentPage()
     const size = pages[page - 1]
     if (!size) return
@@ -224,12 +251,14 @@ export function EditTool({ active = true }: { active?: boolean }) {
       const url = URL.createObjectURL(picture)
       try {
         const box = imagePlacement(await imageSize(url), size)
+        if (opening.current !== version) { URL.revokeObjectURL(url); return }
         // Several at once are staggered so each can be seen.
         const offset = added.length * 16
         added.push({ id: crypto.randomUUID(), page, type: 'image', ...box, x: box.x + offset, y: box.y + offset, file: picture, url })
         urls.current.push(url)
       } catch {
         URL.revokeObjectURL(url)
+        if (opening.current !== version) return
         setError(`Can’t read ${picture.name}.`)
       }
     }
@@ -283,7 +312,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
   function take(files: File[]) {
     const [pdf] = pickFiles(files, 'pdf').wanted
     if (pdf) {
-      open(pdf)
+      if (project.canReplace()) { project.reset(); void open(pdf) }
       return
     }
     const { wanted } = pickFiles(files, 'image')
@@ -298,7 +327,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
     return (
       <>
         {overlay}
-        <Dropzone title="Choose a PDF to edit" onFiles={([f]) => open(f)} />
+        <Dropzone title="Choose a PDF to edit" onFiles={take} />
       </>
     )
   }
@@ -330,6 +359,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
 
       {doc && (
         <>
+          <ProjectControls project={project} />
           <div className="sticky top-0 z-20 -mx-4 space-y-2 bg-zinc-50/95 px-4 py-2 backdrop-blur dark:bg-zinc-950/95">
             <div className="flex flex-wrap items-center gap-2">
               <div role="toolbar" aria-label="Tools" className="inline-flex flex-wrap rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800/70">

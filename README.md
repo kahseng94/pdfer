@@ -24,6 +24,50 @@ change what it was made from, so it never stands in for newer settings.
 To skip the browser or use another port, run the server
 directly: `uv --directory backend run pdfer --no-browser --port 9000`.
 
+### Save and resume projects
+
+In **Edit**, **Organize**, or **Signatures**, your first edit, page arrangement
+change or signature placement automatically creates a local project named after
+the PDF. Further changes update that same project. Open **Saved projects** above
+the tool tabs to resume after refreshing the page or restarting pdfer. The source
+PDF is included, so you do not need to find or upload it again.
+
+Projects keep text, drawings, highlights and placed images in Edit; page order,
+duplicates, removals, rotations, crop/resize settings and selections in Organize;
+and signature images, sizes, positions and page assignments in Signatures.
+Placed images are independent copies, so deleting a signature from the library
+does not break a saved project. Resumed content remains editable. Undo history
+starts fresh, and output previews are rebuilt when requested.
+
+Autosave waits one second after a change, or at most five seconds during continuous
+editing. Changes made while a save is running are saved next. Leaving the tab also
+starts any pending save. The controls show pending, saving, saved, or paused status;
+wait for **All changes saved locally** before closing the page. Leaving or replacing
+a workspace while changes are still unsaved prompts before discarding them.
+
+Use **Save now** to save immediately or **Save as new project** to keep another
+version. Editing the project name also saves automatically. An empty name pauses
+autosave until you enter one. Storage errors and conflicts with another tab pause
+autosave; **Retry saving** retries, and **Save as new project** keeps a separate copy.
+Autosave does not repeatedly retry a failing write in the background.
+
+**Delete** in Saved projects removes only that saved project and its stored files;
+open workspaces and downloaded PDFs remain available. Autosave pauses for a deleted
+project so it is not immediately recreated. Choose **Save as new project** in the
+open workspace to start saving it again.
+
+Projects use IndexedDB in the current browser profile, for the exact pdfer
+address and port. They are local to this device and are not uploaded or synced.
+Use the same browser and address to resume them. Clearing site data or removing
+the browser profile deletes projects, and private browsing does not provide
+lasting storage. Storage failures leave the last saved version intact and show
+an error so you can retry. If another tab updates a project, save your changes
+as a new project to avoid overwriting that version.
+
+Original protected PDFs remain encrypted, and their passwords are never saved.
+Resuming them asks for the password again. Project names, unfinished edits and
+placed images are stored locally without additional encryption.
+
 ### Organize, crop and resize pages
 
 Use **Organize** to reorder, rotate, duplicate or remove pages. Check the
@@ -110,8 +154,8 @@ page scaling are respected, and opening passwords are retained. Signatures
 are visible image overlays. Deleting a saved library entry does not remove
 copies already placed in the current document or in downloaded PDFs.
 
-Only saved signature images and their names are persisted; open PDFs and
-placements stay in the browser session. The library is a private SQLite
+The signature library persists saved images and their names. Save a project
+to also keep an open PDF and its placements between sessions. The library is a private SQLite
 file under `~/Library/Application Support/pdfer/signatures/` on macOS,
 `%LOCALAPPDATA%/pdfer/signatures/` on Windows, or
 `$XDG_DATA_HOME/pdfer/signatures/` (default `~/.local/share/pdfer/signatures/`)
@@ -253,6 +297,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
 frontend/                Vite, React, TypeScript, Tailwind
   src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), TextTool (+ TextPage), EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
+  src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
 ```
 
 New PDF features go in `core.py` first, then get an endpoint in `api.py`.
