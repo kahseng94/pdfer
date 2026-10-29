@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { readOcrStatus, type OcrStatus } from '../lib/api'
+import { readOcrStatus, type OcrEngine, type OcrStatus } from '../lib/api'
 import { pickFiles } from '../lib/files'
 import { useHandoff, useReceive } from '../lib/handoff'
 import { OCR_DPI, ocrPages, recognizePdf, type OcrProgress } from '../lib/ocr'
@@ -20,6 +20,7 @@ async function inspect(file: File, doc: PDFDocumentProxy) {
 }
 
 export function OcrTool({ active = true }: { active?: boolean }) {
+  const [engine, setEngine] = useState<OcrEngine>('tesseract')
   const [status, setStatus] = useState<OcrStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [check, setCheck] = useState(0)
@@ -28,13 +29,13 @@ export function OcrTool({ active = true }: { active?: boolean }) {
   const [dpi, setDpi] = useState(300)
   const [page, setPage] = useState(1)
   const [progress, setProgress] = useState<OcrProgress | null>(null)
-  const task = usePdfTask(inspect, JSON.stringify({ languages, spec, dpi }))
+  const task = usePdfTask(inspect, JSON.stringify({ engine, languages, spec, dpi }))
   const handoff = useHandoff()
 
   useEffect(() => {
     if (!active) return
     const controller = new AbortController()
-    void readOcrStatus(controller.signal).then((value) => {
+    void readOcrStatus(controller.signal, engine).then((value) => {
       if (controller.signal.aborted) return
       setStatusError(null)
       setStatus(value)
@@ -44,7 +45,12 @@ export function OcrTool({ active = true }: { active?: boolean }) {
       })
     }).catch((error: Error) => { if (!controller.signal.aborted) setStatusError(error.message) })
     return () => controller.abort()
-  }, [active, check])
+  }, [active, check, engine])
+
+  function changeEngine(next: OcrEngine) {
+    task.invalidate()
+    setEngine(next); setStatus(null); setStatusError(null); setLanguages([]); setProgress(null)
+  }
 
   async function open(file: File) { setSpec(''); setPage(1); setProgress(null); await task.open(file) }
   function take(files: File[]) { const [file] = pickFiles(files, 'pdf').wanted; if (file) void open(file) }
@@ -58,9 +64,16 @@ export function OcrTool({ active = true }: { active?: boolean }) {
   return <div className="space-y-5">
     {dragging && <DropOverlay label="Drop a PDF to recognize text locally" />}
     <p className="text-sm text-zinc-500">Make scanned pages searchable and selectable. Recognition runs on this computer. Pages that already contain text are skipped; all original pages remain in the output.</p>
+    <label className="block space-y-1 text-sm">OCR engine<select aria-label="OCR engine" value={engine} onChange={(event) => changeEngine(event.target.value as OcrEngine)} className={`${FIELD} block w-full py-2`}>
+      <option value="tesseract">Tesseract</option>
+      <option value="paddleocr">PaddleOCR PP-OCRv6 · medium</option>
+    </select></label>
+    <p className="text-xs text-zinc-500">{engine === 'paddleocr' ? 'Optional multilingual model. Uses more memory and loads its models for each page. Documents are processed locally.' : 'Lightweight local OCR with a choice of installed language packs.'}</p>
     {(!status || !status.available || statusError) && <div className="space-y-3 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
       <p role="status">{statusError ?? status?.message ?? 'Checking the local OCR engine…'}</p>
-      {status && !status.available && <p className="text-zinc-500">Linux: install <code>tesseract-ocr</code> and the language packs you need. Windows: install Tesseract and add it to PATH. See the README for setup.</p>}
+      {status && !status.available && (engine === 'paddleocr'
+        ? <p className="text-zinc-500">Setup downloads the optional runtime and official model weights. Recognition uses the installed local files. Tesseract remains available independently.</p>
+        : <p className="text-zinc-500">Linux: install <code>tesseract-ocr</code> and the language packs you need. Windows: install Tesseract and add it to PATH. See the README for setup.</p>)}
       <button type="button" onClick={() => { task.invalidate(); setStatus(null); setStatusError(null); setCheck((value) => value + 1) }} className="text-rose-600 hover:underline">Check again</button>
     </div>}
     {!task.file ? <Dropzone title="Choose a PDF to recognize text" onFiles={take} /> : <>
@@ -75,10 +88,10 @@ export function OcrTool({ active = true }: { active?: boolean }) {
     {task.doc && <>
       <fieldset disabled={task.busy} className="space-y-4 disabled:opacity-60">
         <legend className="sr-only">OCR settings</legend>
-        <div className="space-y-2"><p className="text-sm font-medium">Document languages</p>
+        {engine === 'paddleocr' ? <div className="space-y-1 text-sm"><p className="font-medium">Automatic multilingual recognition</p><p className="text-zinc-500">The unified model recognizes Chinese, English, Japanese, and supported Latin-script languages. Use Tesseract’s language packs for other scripts.</p></div> : <div className="space-y-2"><p className="text-sm font-medium">Document languages</p>
           <div className="flex max-h-48 flex-wrap gap-x-5 gap-y-2 overflow-auto">{status?.languages.map((language) => <label key={language} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={languages.includes(language)} disabled={!languages.includes(language) && languages.length >= 8} onChange={(event) => { task.invalidate(); setLanguages((current) => event.target.checked ? [...current, language] : current.filter((value) => value !== language)) }} />{LANGUAGE_NAMES[language] ?? language} <span className="text-xs text-zinc-500">({language})</span></label>)}</div>
           <p className="text-xs text-zinc-500">Choose the languages printed on the page. Only installed language packs are listed.</p>
-        </div>
+        </div>}
         <label className="block space-y-1 text-sm">Pages<input aria-label="Pages to recognize" placeholder="All pages, or 1-3, 5, 8-" value={spec} onChange={(event) => { task.invalidate(); setSpec(event.target.value) }} className={`${FIELD} block w-full px-3 py-2`} /></label>
         {problem ? <ErrorMessage>{problem}</ErrorMessage> : <p className="text-xs text-zinc-500">{count} pages selected. Leave blank for all pages.</p>}
         <label className="block space-y-1 text-sm">Recognition resolution<select value={dpi} onChange={(event) => { task.invalidate(); setDpi(Number(event.target.value)) }} className={`${FIELD} block w-full py-2`}>{OCR_DPI.map((value) => <option key={value} value={value}>{value} DPI · {value === 300 ? 'recommended for accuracy' : 'faster, less memory'}</option>)}</select></label>
@@ -87,7 +100,7 @@ export function OcrTool({ active = true }: { active?: boolean }) {
       {pdfPassword(task.file!) && <p className="text-sm text-zinc-500">The searchable copy keeps this PDF’s opening password.</p>}
       {task.busy && progress && <div className="space-y-2 text-sm"><p role="status">{progress.phase === 'assemble' ? 'Building the searchable PDF…' : `${progress.phase === 'inspect' ? 'Checking' : progress.phase === 'render' ? 'Rendering' : 'Recognizing text on'} page ${progress.page}…`} {progress.completed} of {progress.total} selected pages checked{progress.skipped ? ` · ${progress.skipped} already have text` : ''}</p><progress aria-label="OCR progress" value={progress.completed} max={progress.total} className="h-2 w-full accent-rose-600" /></div>}
       <div className="flex flex-wrap items-center gap-4">
-        <Button disabled={task.busy || !status?.available || !!statusError || !languages.length || !!problem} onClick={() => { setProgress(null); void task.preview((file, signal) => recognizePdf(task.doc!, file, spec, languages, dpi, signal, setProgress)) }}>{task.busy ? 'Recognizing text…' : 'Recognize text'}</Button>
+        <Button disabled={task.busy || !status?.available || !!statusError || !languages.length || !!problem} onClick={() => { setProgress(null); void task.preview((file, signal) => recognizePdf(task.doc!, file, spec, languages, dpi, signal, setProgress, engine)) }}>{task.busy ? 'Recognizing text…' : 'Recognize text'}</Button>
         {task.busy && <button type="button" onClick={task.cancel} className="text-sm text-zinc-500">Cancel OCR</button>}
         {handoff && !task.busy && <button type="button" onClick={() => handoff.send('text', task.result?.file ?? task.file!)} className="text-sm text-rose-600 hover:underline">Open {task.result ? 'result' : 'original'} in Search & text</button>}
       </div>

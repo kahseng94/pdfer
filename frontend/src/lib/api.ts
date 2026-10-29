@@ -79,21 +79,23 @@ export async function rebuildRedactedPdf(source: File, pages: File[], sizes: Pdf
   return file
 }
 
+export type OcrEngine = 'tesseract' | 'paddleocr'
 export type OcrStatus = { available: boolean; languages: string[]; message: string | null }
 
-export async function readOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
+export async function readOcrStatus(signal?: AbortSignal, engine: OcrEngine = 'tesseract'): Promise<OcrStatus> {
   let response: Response
-  try { response = await fetch('/api/ocr/status', { signal, cache: 'no-store' }) }
+  try { response = await fetch(engine === 'tesseract' ? '/api/ocr/status' : `/api/ocr/status?engine=${engine}`, { signal, cache: 'no-store' }) }
   catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
   if (!response.ok) throw new Error(`Could not check the OCR engine (HTTP ${response.status}).`)
   return response.json() as Promise<OcrStatus>
 }
 
-export function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal): Promise<File> {
+export function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal, engine: OcrEngine = 'tesseract'): Promise<File> {
   const body = new FormData()
   body.append('image', image, 'page.png')
   body.append('languages', languages.join('+'))
   body.append('dpi', String(dpi))
+  body.append('engine', engine)
   return post('/api/ocr/page', body, 'text.pdf', '', signal)
 }
 

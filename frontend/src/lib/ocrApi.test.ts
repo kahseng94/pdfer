@@ -20,8 +20,21 @@ it('sends only the page image and OCR options to the recognition endpoint', asyn
   const [path, request] = fetch.mock.calls[0]
   expect(path).toBe('/api/ocr/page')
   expect(request.signal).toBe(signal)
-  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi'])
+  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi', 'engine'])
   expect(request.body.get('languages')).toBe('eng+fra')
+  expect(request.body.get('engine')).toBe('tesseract')
+})
+
+it('requests Paddle availability and sends the explicit selected engine', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json({ available: false, languages: [], message: 'Run setup' }))
+    .mockResolvedValueOnce(new Response('layer', { headers: { 'content-type': 'application/pdf' } }))
+  vi.stubGlobal('fetch', fetch)
+  const signal = new AbortController().signal
+  expect((await readOcrStatus(signal, 'paddleocr')).available).toBe(false)
+  expect(fetch).toHaveBeenNthCalledWith(1, '/api/ocr/status?engine=paddleocr', { signal, cache: 'no-store' })
+  await recognizePage(new Blob(['image']), ['auto'], 150, signal, 'paddleocr')
+  expect(fetch.mock.calls[1][1].body.get('engine')).toBe('paddleocr')
+  expect(fetch.mock.calls[1][1].body.get('languages')).toBe('auto')
 })
 
 it('retains passwords in the assembled result and forwards cancellation', async () => {

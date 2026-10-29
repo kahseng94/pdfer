@@ -5,3 +5,6 @@ node_modules/
 .venv/
 __pycache__/
 .pytest_cache/
+
+# Optional OCR model weights are installed explicitly, never committed.
+backend/ocr-runtime/models/

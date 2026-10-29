@@ -1,0 +1,10 @@
+[project]
+name = "pdfer-paddleocr-runtime"
+version = "0.1.0"
+description = "Optional local PP-OCRv6 worker, isolated from pdfer's Python runtime"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "paddleocr==3.7.0",
+    "paddlepaddle>=3.3,<3.4",
+    "huggingface-hub>=0.34,<2",
+]

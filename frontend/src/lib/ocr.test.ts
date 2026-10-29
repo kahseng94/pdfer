@@ -40,7 +40,7 @@ it('recognizes only text-free pages, preserves the full source, and releases ras
   const progress = vi.fn()
   const output = await recognizePdf(doc, source, '', ['eng', 'fra'], 300, signal, progress)
   expect(recognize).toHaveBeenCalledTimes(2)
-  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal])
+  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal, 'tesseract'])
   expect(pages[1].render).not.toHaveBeenCalled()
   expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal)
   expect(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true)
@@ -53,6 +53,24 @@ it('processes only the requested page ranges', async () => {
   await recognizePdf(doc, source, '3, 1, 3', ['eng'], 150, new AbortController().signal, vi.fn())
   expect(getPage.mock.calls).toEqual([[1], [3]])
   expect(assemble.mock.calls[0][2]).toEqual([1, 3])
+})
+
+it('uses the selected PaddleOCR engine for every scanned page without falling back', async () => {
+  const { doc } = fixture(['', ''])
+  const signal = new AbortController().signal
+  await recognizePdf(doc, source, '', ['auto'], 300, signal, vi.fn(), 'paddleocr')
+  expect(recognize).toHaveBeenCalledTimes(2)
+  for (const args of recognize.mock.calls) expect(args.slice(1)).toEqual([['auto'], 300, signal, 'paddleocr'])
+  recognize.mockRejectedValue(new Error('PaddleOCR is unavailable'))
+  assemble.mockClear()
+  await expect(recognizePdf(doc, source, '', ['auto'], 300, signal, vi.fn(), 'paddleocr')).rejects.toThrow('PaddleOCR is unavailable')
+  expect(assemble).not.toHaveBeenCalled()
+})
+
+it('rejects Tesseract language codes for the unified Paddle model', async () => {
+  const { doc } = fixture([''])
+  await expect(recognizePdf(doc, source, '', ['eng'], 300, new AbortController().signal, vi.fn(), 'paddleocr')).rejects.toThrow('automatic multilingual')
+  expect(recognize).not.toHaveBeenCalled()
 })
 
 it('offers no redundant output when all selected pages already contain text', async () => {

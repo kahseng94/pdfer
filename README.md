@@ -247,7 +247,9 @@ items overall and 50,000 per page; split larger PDFs before extraction.
 
 Use **OCR** to add searchable, selectable text to scanned PDF pages. Open a
 PDF directly or choose **Recognize scanned pages** in Search & text. Choose
-one or more installed document languages, a page range (blank means all
+**Tesseract** (the default) or optional **PaddleOCR PP-OCRv6 · medium**.
+Tesseract offers installed language packs; Paddle uses one unified multilingual
+model with automatic recognition. Choose a page range (blank means all
 pages), and 300 DPI for accuracy or 150 DPI for faster processing. Overlapping
 ranges are deduplicated in document order. Only selected pages without
 existing non-whitespace text are recognized; a page containing any existing
@@ -257,13 +259,15 @@ pages and pages with text stay in the document.
 Press **Recognize text**. Progress identifies the current page and stage,
 and **Cancel OCR** stops rendering or the running native OCR process. A
 failure identifies its page and produces no partial result. Changing the
-input or settings clears the previous output. Preview the resulting PDF,
+input or settings clears the previous output. Changing engines also cancels
+an active run; a failed engine never silently falls back to the other one.
+Preview the resulting PDF,
 download it explicitly, or use **Open result in Search & text** to inspect,
 copy, search, or export its recognized text as TXT. The original file is
 preserved, and protected PDFs keep their opening password.
 
-The browser renders each selected scan using PDF.js. Local Tesseract creates
-an invisible text layer; the backend places it over the original page,
+The browser renders each selected scan using PDF.js. The selected local engine
+recognizes its text; the backend places an invisible text layer over the original page,
 respecting rotation, crop boxes and page scaling. Original images, page
 sizes, bookmarks, forms and other PDF objects are preserved. OCR does not
 redact content or modify the page's visible appearance. Recognition is best
@@ -271,8 +275,9 @@ for upright printed text; it can misread characters, columns and handwriting.
 Review the extracted text before relying on it. This version does not
 automatically rotate or deskew scans, or replace existing OCR text.
 
-OCR requires **Tesseract 4 or newer** and its language data on the backend
-computer. Other tools continue to work without it. The OCR tab reports
+The Tesseract option requires **Tesseract 4 or newer** and its language data on
+the backend computer. The engines work independently, and other tools continue
+to work without either. The OCR tab reports
 missing dependencies and offers **Check again** after installation:
 
 - macOS: `brew install tesseract` includes English. For additional languages,
@@ -285,12 +290,43 @@ missing dependencies and offers **Check again** after installation:
 
 Set `PDFER_TESSERACT` to the executable's absolute path if it is not on
 `PATH`. `TESSDATA_PREFIX` can select a custom language-data directory.
-Installed languages are detected locally; there are no automatic model
-downloads or external OCR services. Recognition uses private temporary
+Installed languages are detected locally.
+
+To install the optional Paddle engine, run this once from the project folder:
+
+```bash
+pnpm ocr:paddle:setup
+```
+
+This explicitly downloads a separate Python 3.12 environment, its locked
+PaddleOCR 3.7 dependencies, and pinned revisions of the official
+`PP-OCRv6_medium_det` and `PP-OCRv6_medium_rec` models from PaddlePaddle on
+Hugging Face. It checks real local CPU inference before reporting success.
+Normal `pnpm install` does not install this optional environment or download
+models. Tesseract and the Python 3.14 backend keep their existing dependencies.
+
+The environment lives in `backend/ocr-runtime/.venv/`; model files and runtime
+cache live in `backend/ocr-runtime/models/`. Both are ignored by Git. Run the
+setup command in a new checkout before selecting Paddle there. Use **Check
+again** in the OCR tab after setup. `PDFER_PADDLE_PYTHON` can point to a compatible
+external Python executable; `PDFER_PADDLE_MODELS` can select a model folder
+containing both named model directories. Setup honors that model folder too.
+
+Paddle uses the medium models for Chinese, English, Japanese and their supported
+Latin-script languages. It does not use Tesseract language codes or load other
+model generations as a fallback. The worker uses CPU inference, explicit local
+model paths and disabled model-host connectivity checks; recognition never
+downloads models or calls an external OCR service. The medium models require
+more memory and load anew for each page so cancellation can stop the process.
+Word polygons become an invisible Unicode PDF font layer, supporting recognized
+scripts without requiring extra display fonts. Text remains approximate OCR
+and should be reviewed; engine selection does not guarantee higher accuracy.
+
+Both engines use private temporary
 files, deleted after success, failure or cancellation; documents and OCR
 results are not saved as projects or presets.
 
-Limits: 128 MB source PDFs, 1–1000 pages, up to eight languages per run,
+Limits: 128 MB source PDFs, 1–1000 pages, up to eight Tesseract languages per run,
 32 million pixels / 32 MB per rendered PNG, 8 MB per text layer, and 64 MB
 of text layers per result. Pages are processed sequentially in the browser;
 the backend allows two concurrent native processes, each using at most two
@@ -444,7 +480,8 @@ pnpm test       # backend (pytest) and frontend (vitest)
 ```
 
 The OCR tests include real recognition when Tesseract and its English language
-pack are installed; that integration test is skipped otherwise. Process
+pack are installed, and an independent PP-OCRv6 integration test when its optional
+setup is complete. Those native tests are skipped when their engine is absent. Process
 cancellation, page geometry, password retention and the remaining OCR tests
 run without the native engine.
 
@@ -463,7 +500,10 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/forms.py     canonical AcroForm values, widget appearances and flattening
   src/pdfer/bookmarks.py outline reading/editing with preserved destinations
   src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
-  src/pdfer/ocr.py       local Tesseract processes and invisible text-layer assembly
+  src/pdfer/ocr.py       local OCR process dispatch and invisible text-layer assembly
+  src/pdfer/paddle_ocr.py optional PP-OCRv6 runtime discovery
+  src/pdfer/ocr_text.py  invisible Unicode PDF layers from recognized word positions
+  ocr-runtime/          isolated optional PaddleOCR environment and explicit model setup
   src/pdfer/fonts/       DejaVu Sans, Serif and Sans Mono; add .ttf files here for more scripts
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
@@ -490,8 +530,8 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 
 | Endpoint | Form fields | Returns |
 |---|---|---|
-| `GET /api/ocr/status` | | local engine availability and installed recognition languages |
-| `POST /api/ocr/page` | `image` (PNG), `languages` (e.g. `eng+fra`), `dpi` (150 or 300) | an invisible, one-page PDF text layer |
+| `GET /api/ocr/status` | optional query `engine=tesseract\|paddleocr` (default `tesseract`) | selected local engine availability and recognition languages |
+| `POST /api/ocr/page` | `image` (PNG), `languages` (`eng+fra` for Tesseract or `auto` for Paddle), `dpi` (150 or 300), optional `engine` (default `tesseract`) | an invisible, one-page PDF text layer |
 | `POST /api/ocr/assemble` | `file`, `layers` (PDF text layers), `pages` (JSON page-number list), optional `password` | `<name>_searchable.pdf`, preserving original pages and password |
 | `POST /api/merge` | `files` (2 or more, in order), optional `passwords` | `merged.pdf` |
 | `POST /api/split` | `file`, `mode`, `ranges`, optional `password` | a PDF, or a zip if there are several outputs |
