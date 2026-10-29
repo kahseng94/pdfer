@@ -16,6 +16,7 @@ import { SplitTool } from './components/SplitTool'
 import { StampTool } from './components/StampTool'
 import { SignatureTool } from './components/SignatureTool'
 import { TextTool } from './components/TextTool'
+import { OcrTool } from './components/OcrTool'
 import { WorkflowTool } from './components/WorkflowTool'
 import { BookmarksTool } from './components/BookmarksTool'
 import { FormsTool } from './components/FormsTool'
@@ -92,6 +93,9 @@ export default function App() {
             </section>
             <section id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden={tool !== 'text'}>
               <TextTool active={tool === 'text'} />
+            </section>
+            <section id="panel-ocr" role="tabpanel" aria-labelledby="tab-ocr" hidden={tool !== 'ocr'}>
+              <OcrTool active={tool === 'ocr'} />
             </section>
             <section id="panel-edit" role="tabpanel" aria-labelledby="tab-edit" hidden={tool !== 'edit'}>
               <EditTool active={tool === 'edit'} />

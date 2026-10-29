@@ -1,7 +1,7 @@
 """HTTP API for the local web app.
 
-Endpoints are plain `def` so FastAPI runs the CPU-bound PDF work in a thread
-pool instead of blocking the event loop.
+Most endpoints are plain `def` so FastAPI runs CPU-bound PDF work in a thread
+pool. Native OCR runs asynchronously so a disconnected client stops its process.
 """
 
 import argparse
@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import bookmarks, core, fonts, forms, redactions, signatures
+from pdfer import bookmarks, core, fonts, forms, ocr, redactions, signatures
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -127,6 +127,38 @@ def redact(pages: Annotated[list[UploadFile], File()], sizes: Annotated[str, For
         total += len(image)
         data.append(image)
     return _download(redactions.rebuild(data, sizes, password), "redacted.pdf", "application/pdf")
+
+
+@app.get("/api/ocr/status")
+def ocr_status() -> Response:
+    return JSONResponse(ocr.status(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/ocr/page")
+async def ocr_page(request: Request, image: UploadFile, languages: Annotated[str, Form()], dpi: Annotated[int, Form()] = 300) -> Response:
+    data = await image.read(ocr.MAX_IMAGE_BYTES + 1)
+    if len(data) > ocr.MAX_IMAGE_BYTES:
+        raise core.PdfToolError("This page image is too large. Choose 150 DPI or split the PDF first.")
+    output = await ocr.recognize(data, languages, dpi, request.is_disconnected)
+    return _download(output, "text.pdf", "application/pdf")
+
+
+@app.post("/api/ocr/assemble")
+def ocr_assemble(file: UploadFile, layers: Annotated[list[UploadFile], File()], pages: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
+    source = file.file.read(ocr.MAX_SOURCE_BYTES + 1)
+    if len(source) > ocr.MAX_SOURCE_BYTES or len(layers) > 1000:
+        raise core.PdfToolError("This PDF is too large for OCR. Split it first.")
+    contents = []
+    total = 0
+    for layer in layers:
+        limit = min(ocr.MAX_LAYER_BYTES, ocr.MAX_TOTAL_LAYERS - total)
+        data = layer.file.read(limit + 1)
+        if len(data) > limit:
+            raise core.PdfToolError("This OCR result is too large. Split the document first.")
+        contents.append(data)
+        total += len(data)
+    output = ocr.assemble(source, contents, pages, file.filename or "document.pdf", password)
+    return _download(output, f"{_stem(file.filename)}_searchable.pdf", "application/pdf")
 
 
 def _stem(filename: str | None) -> str:

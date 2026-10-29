@@ -79,6 +79,31 @@ export async function rebuildRedactedPdf(source: File, pages: File[], sizes: Pdf
   return file
 }
 
+export type OcrStatus = { available: boolean; languages: string[]; message: string | null }
+
+export async function readOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
+  let response: Response
+  try { response = await fetch('/api/ocr/status', { signal, cache: 'no-store' }) }
+  catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
+  if (!response.ok) throw new Error(`Could not check the OCR engine (HTTP ${response.status}).`)
+  return response.json() as Promise<OcrStatus>
+}
+
+export function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal): Promise<File> {
+  const body = new FormData()
+  body.append('image', image, 'page.png')
+  body.append('languages', languages.join('+'))
+  body.append('dpi', String(dpi))
+  return post('/api/ocr/page', body, 'text.pdf', '', signal)
+}
+
+export function assembleOcr(file: File, layers: readonly File[], pages: readonly number[], signal: AbortSignal): Promise<File> {
+  const body = pdfBody(file)
+  for (const layer of layers) body.append('layers', layer)
+  body.append('pages', JSON.stringify(pages))
+  return post('/api/ocr/assemble', body, 'searchable.pdf', pdfPassword(file), signal)
+}
+
 export function mergePdfs(files: File[]): Promise<File> {
   const body = new FormData()
   for (const f of files) body.append('files', f)

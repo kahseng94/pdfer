@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { saveFile } from '../lib/api'
 import { pickFiles } from '../lib/files'
-import { useReceive } from '../lib/handoff'
+import { useHandoff, useReceive } from '../lib/handoff'
 import { pdfPassword } from '../lib/passwords'
 import { closePdf, formatSize, type PDFDocumentProxy } from '../lib/pdf'
 import { exportText, extractPdfText, matchKey, MAX_MATCHES, runHighlights, searchText, textFile, textPages, type PageText, type SearchOptions, type TextMatch, type TextProgress, type TextScope } from '../lib/pdfText'
@@ -16,6 +16,7 @@ const SEARCH_DEFAULTS: SearchOptions = { matchCase: false, wholeWord: false }
 const RESULT_WINDOW = 40
 
 export function TextTool({ active = true }: { active?: boolean }) {
+  const handoff = useHandoff()
   const [file, setFile] = useState<File | null>(null)
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [pages, setPages] = useState<PageText[] | null>(null)
@@ -166,7 +167,7 @@ export function TextTool({ active = true }: { active?: boolean }) {
   const dragging = useWindowDrop(take, active)
   useReceive('text', take)
   const overlay = dragging && <DropOverlay label="Drop a PDF to search and extract text" />
-  if (!file) return <>{overlay}<Dropzone title="Choose a PDF to search or extract text" onFiles={take} /><p className="mt-3 text-sm text-zinc-500">Find existing PDF text, copy it, or save a TXT file. Scanned pages need OCR first.</p></>
+  if (!file) return <>{overlay}<Dropzone title="Choose a PDF to search or extract text" onFiles={take} /><p className="mt-3 text-sm text-zinc-500">Find existing PDF text, copy it, or save a TXT file. Use the OCR tab to recognize scanned pages first.</p></>
   const resultStart = Math.floor((selectedIndex ?? 0) / RESULT_WINDOW) * RESULT_WINDOW
 
   return <div className="space-y-5">
@@ -187,6 +188,7 @@ export function TextTool({ active = true }: { active?: boolean }) {
 
     {pages && doc && <>
       {pagesWithText === 0 && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">No extractable text was found. This PDF may contain scanned images or outlined letters. OCR is needed before its text can be searched or exported.</p>}
+      {pagesWithText < pages.length && handoff && <div className="flex flex-wrap items-center gap-3 text-sm"><p className="text-zinc-500">Pages without extractable text may need OCR.</p><button type="button" onClick={() => handoff.send('ocr', file)} className="text-rose-600 hover:underline">Recognize scanned pages</button></div>}
       <div className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <label htmlFor="pdf-text-search" className="block text-sm font-medium">Find in document</label>
         <input id="pdf-text-search" type="search" value={query} onChange={(e) => changeQuery(e.target.value)} maxLength={256} disabled={!pagesWithText} placeholder="Search for a word or phrase" autoComplete="off" spellCheck={false}

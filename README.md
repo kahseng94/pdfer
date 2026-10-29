@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, search, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
+Merge, split, organize, search, OCR, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Requirements
@@ -236,12 +236,66 @@ blank pages. **Copy text** and **Download TXT** use the same selected text;
 TXT files are UTF-8 and download only when requested. Text exported from
 a protected PDF has no password protection.
 
-This feature extracts existing PDF text; it does not perform OCR. Scanned
-pages and outlined letters may have no extractable text. Columns and tables
+This feature extracts existing PDF text. Use **Recognize scanned pages** or
+the **OCR** tab to add text to scanned pages or outlined letters first. Columns and tables
 may have imperfect spacing or reading order. Extraction reads the PDF text
 data, so cropping alone should not be used to remove sensitive text. Large
 documents are bounded to 10 million extracted characters, 500,000 text
 items overall and 50,000 per page; split larger PDFs before extraction.
+
+### Local OCR
+
+Use **OCR** to add searchable, selectable text to scanned PDF pages. Open a
+PDF directly or choose **Recognize scanned pages** in Search & text. Choose
+one or more installed document languages, a page range (blank means all
+pages), and 300 DPI for accuracy or 150 DPI for faster processing. Overlapping
+ranges are deduplicated in document order. Only selected pages without
+existing non-whitespace text are recognized; a page containing any existing
+text, even just a header, is skipped to avoid duplicate text. Unselected
+pages and pages with text stay in the document.
+
+Press **Recognize text**. Progress identifies the current page and stage,
+and **Cancel OCR** stops rendering or the running native OCR process. A
+failure identifies its page and produces no partial result. Changing the
+input or settings clears the previous output. Preview the resulting PDF,
+download it explicitly, or use **Open result in Search & text** to inspect,
+copy, search, or export its recognized text as TXT. The original file is
+preserved, and protected PDFs keep their opening password.
+
+The browser renders each selected scan using PDF.js. Local Tesseract creates
+an invisible text layer; the backend places it over the original page,
+respecting rotation, crop boxes and page scaling. Original images, page
+sizes, bookmarks, forms and other PDF objects are preserved. OCR does not
+redact content or modify the page's visible appearance. Recognition is best
+for upright printed text; it can misread characters, columns and handwriting.
+Review the extracted text before relying on it. This version does not
+automatically rotate or deskew scans, or replace existing OCR text.
+
+OCR requires **Tesseract 4 or newer** and its language data on the backend
+computer. Other tools continue to work without it. The OCR tab reports
+missing dependencies and offers **Check again** after installation:
+
+- macOS: `brew install tesseract` includes English. For additional languages,
+  use `brew install tesseract-lang`.
+- Debian/Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-eng`.
+  Add language packages such as `tesseract-ocr-fra` as needed.
+- Windows: install Tesseract using the options in the
+  [official installation guide](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+  and add its executable directory to `PATH`.
+
+Set `PDFER_TESSERACT` to the executable's absolute path if it is not on
+`PATH`. `TESSDATA_PREFIX` can select a custom language-data directory.
+Installed languages are detected locally; there are no automatic model
+downloads or external OCR services. Recognition uses private temporary
+files, deleted after success, failure or cancellation; documents and OCR
+results are not saved as projects or presets.
+
+Limits: 128 MB source PDFs, 1–1000 pages, up to eight languages per run,
+32 million pixels / 32 MB per rendered PNG, 8 MB per text layer, and 64 MB
+of text layers per result. Pages are processed sequentially in the browser;
+the backend allows two concurrent native processes, each using at most two
+OpenMP threads and timing out after three minutes. Split large documents
+or lower the resolution if a limit is reached.
 
 ### Reusable signatures
 
@@ -389,6 +443,11 @@ pnpm dev        # API on :8000 with reload, UI on http://localhost:5173
 pnpm test       # backend (pytest) and frontend (vitest)
 ```
 
+The OCR tests include real recognition when Tesseract and its English language
+pack are installed; that integration test is skipped otherwise. Process
+cancellation, page geometry, password retention and the remaining OCR tests
+run without the native engine.
+
 The repo is a pnpm workspace with one package, `frontend`. Add frontend
 dependencies with `pnpm --filter pdfer-frontend add <pkg>` and backend ones with
 `uv --directory backend add <pkg>`. `uv run` keeps the Python environment in
@@ -404,6 +463,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/forms.py     canonical AcroForm values, widget appearances and flattening
   src/pdfer/bookmarks.py outline reading/editing with preserved destinations
   src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
+  src/pdfer/ocr.py       local Tesseract processes and invisible text-layer assembly
   src/pdfer/fonts/       DejaVu Sans, Serif and Sans Mono; add .ttf files here for more scripts
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
@@ -411,6 +471,8 @@ frontend/                Vite, React, TypeScript, Tailwind
   src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
+  src/components/OcrTool.tsx OCR languages, ranges, progress and preview
+  src/lib/ocr.ts         sequential scan rendering and OCR orchestration
 ```
 
 New PDF features go in `core.py` first, then get an endpoint in `api.py`.
@@ -428,6 +490,9 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 
 | Endpoint | Form fields | Returns |
 |---|---|---|
+| `GET /api/ocr/status` | | local engine availability and installed recognition languages |
+| `POST /api/ocr/page` | `image` (PNG), `languages` (e.g. `eng+fra`), `dpi` (150 or 300) | an invisible, one-page PDF text layer |
+| `POST /api/ocr/assemble` | `file`, `layers` (PDF text layers), `pages` (JSON page-number list), optional `password` | `<name>_searchable.pdf`, preserving original pages and password |
 | `POST /api/merge` | `files` (2 or more, in order), optional `passwords` | `merged.pdf` |
 | `POST /api/split` | `file`, `mode`, `ranges`, optional `password` | a PDF, or a zip if there are several outputs |
 | `POST /api/organize` | `file`, `pages`, optional `layout` (JSON), optional `password` | `<name>_organized.pdf`, used for preview and download |
