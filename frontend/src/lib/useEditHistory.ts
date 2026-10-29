@@ -15,6 +15,6 @@ export function useEditHistory<T extends Element = Element>() {
   const commit = useCallback((update: (elements: T[]) => T[]) => setHistory((state) => ({ past: push(state), present: update(state.present), future: [] })), [])
   const undo = useCallback(() => setHistory((state) => state.past.length ? { past: state.past.slice(0, -1), present: state.past[state.past.length - 1], future: [state.present, ...state.future] } : state), [])
   const redo = useCallback(() => setHistory((state) => state.future.length ? { past: [...state.past, state.present], present: state.future[0], future: state.future.slice(1) } : state), [])
-  const reset = useCallback(() => setHistory({ past: [], present: [], future: [] }), [])
+  const reset = useCallback((present: T[] = []) => setHistory({ past: [], present, future: [] }), [])
   return { elements: history.present, canUndo: history.past.length > 0, canRedo: history.future.length > 0, begin, change, end, commit, undo, redo, reset }
 }

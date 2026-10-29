@@ -1,7 +1,7 @@
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { organizePdf } from '../lib/api'
 import { pickFiles } from '../lib/files'
 import { useReceive } from '../lib/handoff'
@@ -12,6 +12,9 @@ import { turn } from '../lib/ranges'
 import { useResult } from '../lib/result'
 import { usePdfLoader } from '../lib/usePdfLoader'
 import { useWindowDrop } from '../lib/windowDrop'
+import { checkProjectPages, type ProjectDraft, type ProjectStates } from '../lib/projects'
+import { useProject } from '../lib/useProject'
+import { ProjectControls } from './ProjectControls'
 import { DocumentPreview } from './DocumentPreview'
 import { Dropzone } from './Dropzone'
 import { CopyIcon, RotateIcon, XIcon } from './icons'
@@ -50,6 +53,8 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
   const reference = checkedItems.find((item) => item.id === referenceId) ?? checkedItems[0]
   const referenceSize = reference && sizes[reference.page - 1] ? displayedSize(sizes[reference.page - 1], reference.rotation) : null
   const onReady = useCallback((ready: PDFDocumentProxy | null) => setRendered(ready), [])
+  const changed = !!doc && (items.length !== doc.numPages || items.some((item, i) => item.page !== i + 1 || item.rotation !== 0) || settings.cropEnabled || settings.resizeEnabled)
+  const draft = useMemo<ProjectDraft<'organize'> | null>(() => file && doc ? { tool: 'organize', file, state: { items, selected: [...selected], settings, referenceId } } : null, [file, doc, items, selected, settings, referenceId])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -84,7 +89,7 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
     setReferenceId('')
     setPage(1)
   }
-  function chooseAnother() {
+  function resetWorkspace() {
     opening.current += 1
     invalidate()
     loader.cancel()
@@ -96,32 +101,39 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
     resetPages(0)
     setPreviewed(false)
   }
-  async function open(next: File) {
-    chooseAnother()
+  function chooseAnother() { if (project.canReplace()) { project.reset(); resetWorkspace() } }
+  async function open(next: File, saved?: ProjectStates['organize']): Promise<boolean> {
+    resetWorkspace()
     const version = opening.current
     setFile(next)
     try {
       const loaded = await loader.load(next)
-      if (opening.current !== version) { closePdf(loaded); return }
+      if (opening.current !== version) { closePdf(loaded); return false }
       sourceRef.current = loaded
+      if (saved) checkProjectPages(saved, loaded.numPages)
       const dimensions: PageSize[] = []
       for (let number = 1; number <= loaded.numPages; number++) {
         const source = await loaded.getPage(number)
-        if (opening.current !== version) return
+        if (opening.current !== version) return false
         const viewport = source.getViewport({ scale: 1 })
         dimensions.push({ width: viewport.width, height: viewport.height })
       }
       setSizes(dimensions)
       setDoc(loaded)
-      resetPages(loaded.numPages)
+      if (saved) {
+        setItems(saved.items); setSelected(new Set(saved.selected)); setSettings(saved.settings); setReferenceId(saved.referenceId)
+      } else resetPages(loaded.numPages)
+      return true
     } catch (err) {
       if (opening.current === version) {
         closePdf(sourceRef.current)
         sourceRef.current = null
         setError((err as Error).message)
       }
+      return false
     }
   }
+  const project = useProject('organize', draft, changed || selected.size !== items.length || settings !== DEFAULT_ORGANIZE, (saved) => open(saved.file, saved.state))
   function changeSettings(patch: Partial<OrganizeSettings>) {
     invalidate()
     setSettings((previous) => ({ ...previous, ...patch }))
@@ -178,7 +190,7 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
   }
   function take(files: File[]) {
     const [next] = pickFiles(files, 'pdf').wanted
-    if (next) void open(next)
+    if (next && project.canReplace()) { project.reset(); void open(next) }
   }
   const dragging = useWindowDrop(take, active)
   useReceive('organize', take)
@@ -186,7 +198,6 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
   if (!file) return <>{overlay}<Dropzone title="Choose a PDF to organize" onFiles={take} /></>
   const total = doc?.numPages ?? 0
   const count = items.length
-  const changed = count !== total || items.some((item, i) => item.page !== i + 1 || item.rotation !== 0) || settings.cropEnabled || settings.resizeEnabled
 
   return <div className="space-y-5">
     {overlay}
@@ -200,6 +211,7 @@ export function OrganizeTool({ active = true }: { active?: boolean }) {
     </div>
     {!doc && !error && <p role="status" className="text-sm text-zinc-500">Opening PDF…</p>}
     {doc && <>
+      <ProjectControls project={project} />
       <fieldset disabled={busy} className="min-w-0 space-y-5 disabled:opacity-60">
         <legend className="sr-only">Organize pages and set crop and size</legend>
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -11,6 +11,9 @@ import { fitSignature, initialSignatureBox, signaturePayload, type SignaturePage
 import { useEditHistory } from '../lib/useEditHistory'
 import { usePdfLoader } from '../lib/usePdfLoader'
 import { useWindowDrop } from '../lib/windowDrop'
+import { checkProjectPages, type ProjectDraft, type ProjectStates } from '../lib/projects'
+import { useProject } from '../lib/useProject'
+import { ProjectControls } from './ProjectControls'
 import { DocumentPreview } from './DocumentPreview'
 import { Dropzone } from './Dropzone'
 import { EditPage, type Editor } from './EditPage'
@@ -88,6 +91,8 @@ export function SignatureTool({ active = true }: { active?: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const ready = useCallback((rendered: PDFDocumentProxy | null) => setRendered(rendered), [])
+  const draft = useMemo<ProjectDraft<'signatures'> | null>(() => file && doc ? { tool: 'signatures', file, state: { elements, page, assetId } } : null, [file, doc, elements, page, assetId])
+  const project = useProject('signatures', draft, elements.length > 0, (saved) => open(saved.file, saved.state))
 
   useEffect(() => {
     if (!doc || !container.current) return
@@ -115,24 +120,30 @@ export function SignatureTool({ active = true }: { active?: boolean }) {
     setFile(null); setDoc(null); setPages([]); setPage(1); setSelectedId(null); setPlacing(false); setError(null)
     history.reset()
   }
-  async function open(next: File) {
+  async function open(next: File, saved?: ProjectStates['signatures']): Promise<boolean> {
     reset()
     const current = version.current
     setFile(next)
     let loaded: PDFDocumentProxy | null = null
     try {
       loaded = await loader.load(next)
+      if (saved) checkProjectPages(saved, loaded.numPages)
       const sizes = await Promise.all(Array.from({ length: loaded.numPages }, async (_, index) => {
         const source = await loaded!.getPage(index + 1)
         const viewport = source.getViewport({ scale: 1 })
         return { width: viewport.width, height: viewport.height, unit: source.userUnit }
       }))
-      if (version.current !== current) { closePdf(loaded); return }
+      if (version.current !== current) { closePdf(loaded); return false }
       sourceDoc.current = loaded
       setDoc(loaded); setPages(sizes)
-    } catch (error) { closePdf(loaded); if (version.current === current) setError((error as Error).message) }
+      if (saved) {
+        history.reset(saved.elements); setPage(saved.page); setAssetId(saved.assetId)
+        for (const element of saved.elements) pictures.current.set(element.signatureId, { file: element.file, url: element.url })
+      }
+      return true
+    } catch (error) { closePdf(loaded); if (version.current === current) setError((error as Error).message); return false }
   }
-  function take(files: File[]) { const [next] = pickFiles(files, 'pdf').wanted; if (next) void open(next) }
+  function take(files: File[]) { const [next] = pickFiles(files, 'pdf').wanted; if (next && project.canReplace()) { project.reset(); void open(next) } }
   const dragging = useWindowDrop(take, active)
   useReceive('signatures', take)
 
@@ -218,11 +229,12 @@ export function SignatureTool({ active = true }: { active?: boolean }) {
 
     {!file ? <Dropzone title="Choose a PDF to add signatures" onFiles={take} /> : <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="min-w-0"><p className="truncate font-medium">{file.name}</p><p className="text-sm text-zinc-500">{doc && `${doc.numPages} ${doc.numPages === 1 ? 'page' : 'pages'} · `}{formatSize(file.size)}</p>{doc && pdfPassword(file) && <p className="text-sm text-zinc-500">The saved PDF will keep this file’s password.</p>}</div>
-      <button type="button" onClick={reset} className="shrink-0 text-sm text-zinc-500">Choose another file</button>
+      <button type="button" onClick={() => { if (project.canReplace()) { project.reset(); reset() } }} className="shrink-0 text-sm text-zinc-500">Choose another file</button>
     </div>}
     {file && !doc && !error && <p role="status" className="text-sm text-zinc-500">Opening PDF…</p>}
     {error && <ErrorMessage>{error}</ErrorMessage>}
     {doc && <>
+      <ProjectControls project={project} />
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <label className="flex items-center gap-2">PDF page<select aria-label="Signature page" value={page} disabled={placing} onChange={(e) => { setPage(Number(e.target.value)); setSelectedId(null) }} className={FIELD}>{pages.map((_, i) => <option key={i + 1} value={i + 1}>{i + 1} / {pages.length}</option>)}</select></label>
         <span className="text-zinc-500">{chosen ? `Selected: ${chosen.name}` : 'Choose a saved signature above'}</span>
