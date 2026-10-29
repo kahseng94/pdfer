@@ -15,6 +15,7 @@ import { PhotoTool } from './components/PhotoTool'
 import { SplitTool } from './components/SplitTool'
 import { StampTool } from './components/StampTool'
 import { SignatureTool } from './components/SignatureTool'
+import { TextTool } from './components/TextTool'
 
 export default function App() {
   const [tool, setTool] = useState<ToolId>(() => loadTool(TOOL_IDS, 'merge'))
@@ -41,7 +42,7 @@ export default function App() {
             <LogoIcon className="size-9" />
             <div>
               <h1 className="text-xl font-semibold tracking-tight">pdfer</h1>
-              <p className="text-sm text-zinc-500">Merge, split, organize, edit, compress and protect PDFs, convert between PDFs and images, or crop a passport photo, on your own computer.</p>
+              <p className="text-sm text-zinc-500">Merge, split, organize, search, edit, compress and protect PDFs, convert between PDFs and images, or crop a passport photo, on your own computer.</p>
             </div>
           </header>
 
@@ -75,6 +76,9 @@ export default function App() {
           </section>
           <section id="panel-organize" role="tabpanel" aria-labelledby="tab-organize" hidden={tool !== 'organize'}>
             <OrganizeTool active={tool === 'organize'} />
+          </section>
+          <section id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden={tool !== 'text'}>
+            <TextTool active={tool === 'text'} />
           </section>
           <section id="panel-edit" role="tabpanel" aria-labelledby="tab-edit" hidden={tool !== 'edit'}>
             <EditTool active={tool === 'edit'} />

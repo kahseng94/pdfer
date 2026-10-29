@@ -6,6 +6,7 @@ export const TOOLS = [
   { id: 'merge', label: 'Merge', takes: 'pdf' },
   { id: 'split', label: 'Split', takes: 'pdf' },
   { id: 'organize', label: 'Organize', takes: 'pdf' },
+  { id: 'text', label: 'Search & text', takes: 'pdf' },
   { id: 'edit', label: 'Edit', takes: 'pdf' },
   { id: 'signatures', label: 'Signatures', takes: 'pdf' },
   { id: 'stamps', label: 'Numbers & watermarks', takes: 'pdf' },

@@ -16,14 +16,15 @@ const MAX_PAGE_ITEMS = 50_000
 /** Add only spaces missing between positioned runs, never between adjacent glyphs. */
 function separator(previous: TextItem, next: TextItem): string {
   const [a, b, c, d, x, y] = previous.transform as number[]
-  const length = Math.hypot(a, b)
+  const vertical = previous.dir === 'ttb'
+  const length = vertical ? Math.hypot(c, d) : Math.hypot(a, b)
   if (!length) return ''
-  const ux = a / length, uy = b / length
+  const ux = (vertical ? -c : a) / length, uy = (vertical ? -d : b) / length
   const dx = Number(next.transform[4]) - x, dy = Number(next.transform[5]) - y
   const height = Math.max(Math.hypot(c, d), Math.hypot(Number(next.transform[2]), Number(next.transform[3])), 1)
   if (Math.abs(-uy * dx + ux * dy) > height * 0.5) return '\n'
   const advance = dx * ux + dy * uy
-  const gap = Math.max(advance - previous.width, -advance - next.width)
+  const gap = Math.max(advance - (vertical ? previous.height : previous.width), -advance - (vertical ? next.height : next.width))
   return gap > height * 0.15 ? ' ' : ''
 }
 
@@ -70,9 +71,12 @@ export async function extractPdfText(doc: PDFDocumentProxy, options: {
       const content = await source.getTextContent({ includeMarkedContent: false })
       signal.throwIfAborted()
       items += content.items.length
+      if (items > MAX_ITEMS || content.items.length > MAX_PAGE_ITEMS) {
+        throw new Error('This PDF has too much text for one session. Split it into smaller PDFs and try again.')
+      }
       const page = pageText(content, number)
       characters += page.text.length
-      if (characters > MAX_CHARACTERS || items > MAX_ITEMS || content.items.length > MAX_PAGE_ITEMS) {
+      if (characters > MAX_CHARACTERS) {
         throw new Error('This PDF has too much text for one session. Split it into smaller PDFs and try again.')
       }
       pages.push(page)
@@ -105,11 +109,19 @@ export function searchText(pages: readonly PageText[], query: string, options: S
 
 /** Match slices within one text span. Phrases may span several PDF items/lines. */
 export function runHighlights(run: TextRun, matches: readonly TextMatch[]): { start: number; end: number; match: TextMatch }[] {
-  return matches.filter((match) => match.start < run.end && match.end > run.start).map((match) => ({
-    start: Math.max(match.start, run.start) - run.start,
-    end: Math.min(match.end, run.end) - run.start,
-    match,
-  }))
+  if (run.end <= run.start) return []
+  let low = 0, high = matches.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (matches[middle].end <= run.start) low = middle + 1
+    else high = middle
+  }
+  const result = []
+  for (let index = low; index < matches.length && matches[index].start < run.end; index++) {
+    const match = matches[index]
+    result.push({ start: Math.max(match.start, run.start) - run.start, end: Math.min(match.end, run.end) - run.start, match })
+  }
+  return result
 }
 
 export function matchKey(match: TextMatch): string { return `${match.page}:${match.start}:${match.end}` }

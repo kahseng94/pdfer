@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, edit, compress and protect PDFs, export PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
+Merge, split, organize, search, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Requirements
@@ -53,6 +53,41 @@ after rendering and saves the exact previewed bytes. Changing the page
 order, selection or settings clears the old preview. Preview generation
 can be cancelled, and protected inputs keep their opening password.
 **Reset all changes** restores the original page order, rotation and size.
+
+### Search and extract text
+
+Open **Search & text** and choose a PDF, drop one anywhere on the tab, or
+use another tool's **Open in Search & text** button. Text extraction runs
+locally in the browser, one page at a time, with progress and cancellation.
+Protected PDFs use the existing password prompt. Cancelling or replacing a
+document discards unfinished extraction; **Retry extraction** starts again.
+
+Search for a word or phrase across the document, with optional **Match
+case** and **Whole words**. Phrases can span line breaks on the same page.
+Search is literal, including punctuation; it does not interpret regular
+expressions. Results show page numbers and snippets. Click a result or use
+**Previous match** / **Next match** to navigate; Enter and Shift+Enter in
+the search field also move between matches, wrapping at the ends.
+
+Matches are highlighted in the selectable **PDF preview**, including on
+rotated and scaled pages. **Extracted text** shows the same page as plain
+text with matching highlights. Page navigation also works without a search.
+Results are shown in groups of 40; very broad searches stop at 10,000
+matches and ask for a narrower query.
+
+Choose all pages, the current page, or page ranges such as `1-3, 5, 8-` to
+copy or export. Overlapping ranges are deduplicated in document order.
+Page headings are optional and retain the original page numbers, including
+blank pages. **Copy text** and **Download TXT** use the same selected text;
+TXT files are UTF-8 and download only when requested. Text exported from
+a protected PDF has no password protection.
+
+This feature extracts existing PDF text; it does not perform OCR. Scanned
+pages and outlined letters may have no extractable text. Columns and tables
+may have imperfect spacing or reading order. Extraction reads the PDF text
+data, so cropping alone should not be used to remove sensitive text. Large
+documents are bounded to 10 million extracted characters, 500,000 text
+items overall and 50,000 per page; split larger PDFs before extraction.
 
 ### Reusable signatures
 
@@ -216,8 +251,8 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
-  src/lib/               API client, the tool list and passing results between tools, pdf.js previews and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), TextTool (+ TextPage), EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/lib/               API client, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
 ```
 
 New PDF features go in `core.py` first, then get an endpoint in `api.py`.
@@ -225,6 +260,8 @@ PDF-to-image export uses the existing pdf.js renderer in the browser and
 `fflate` for ZIP packaging, so it needs no backend endpoint or native renderer.
 Batch PDF compression calls the existing `/api/compress` endpoint sequentially,
 with each file's password, and packages the returned PDFs locally with `fflate`.
+Text search and TXT export use the existing pdf.js parser and text layer in
+the browser, so no backend endpoint or OCR dependency is needed.
 
 ## API
 

@@ -55,6 +55,13 @@ describe('text extraction and offsets', () => {
     await expect(extractPdfText({ numPages: 3, getPage } as unknown as PDFDocumentProxy, { signal: new AbortController().signal })).rejects.toThrow('Could not extract page 2: Unreadable text')
     expect(getPage).toHaveBeenCalledTimes(2)
   })
+  it('does no work when already cancelled and rejects a page too large to render safely', async () => {
+    const getPage = vi.fn(async () => ({ getTextContent: async () => content(Array.from({ length: 50_001 }, () => item('x'))) }))
+    const doc = { numPages: 1, getPage } as unknown as PDFDocumentProxy
+    await expect(extractPdfText(doc, { signal: AbortSignal.abort() })).rejects.toThrow()
+    expect(getPage).not.toHaveBeenCalled()
+    await expect(extractPdfText(doc, { signal: new AbortController().signal })).rejects.toThrow('too much text')
+  })
 })
 
 describe('literal PDF search', () => {

@@ -9,3 +9,48 @@
 :root {
   color-scheme: light dark;
 }
+
+/* PDF.js positions the selectable text; its glyphs stay transparent over the canvas. */
+.pdf-search-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  text-align: initial;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.pdf-search-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+}
+.pdf-search-text-layer > span {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-search-text-layer mark {
+  color: transparent;
+  background: rgb(250 204 21 / 0.45);
+  padding: 0;
+}
+.pdf-search-text-layer mark.current-match {
+  background: rgb(251 146 60 / 0.55);
+  outline: 1px solid #ea580c;
+}
+.pdf-search-text-layer ::selection { background: rgb(59 130 246 / 0.3); }
+.pdf-search-text-layer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+.pdf-search-text-layer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.pdf-search-text-layer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
