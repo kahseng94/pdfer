@@ -82,6 +82,14 @@ function storedElement(value: unknown, images: number, signature: boolean): bool
     case 'text': return numbers(value, ['x', 'y', 'size']) && typeof value.text === 'string' && typeof value.color === 'string'
       && ['sans', 'serif', 'mono'].includes(value.family as string) && typeof value.bold === 'boolean' && typeof value.italic === 'boolean'
     case 'image': return numbers(value, ['x', 'y', 'width', 'height']) && Number.isInteger(value.image) && (value.image as number) >= 0 && (value.image as number) < images
+    case 'region': return numbers(value, ['x', 'y', 'width', 'height']) && (value.x as number) >= 0 && (value.y as number) >= 0
+      && (value.rotation === undefined || [0, 90, 180, 270].includes(value.rotation as number))
+      && (value.copy === undefined || typeof value.copy === 'boolean') && !(value.copy && value.deleted)
+      && (value.deleted === undefined || typeof value.deleted === 'boolean')
+      && (value.sourcePage === undefined || (Number.isInteger(value.sourcePage) && (value.sourcePage as number) >= 1))
+      && (value.width as number) >= 2 && (value.height as number) >= 2 && object(value.source)
+      && numbers(value.source, ['x', 'y', 'width', 'height']) && (value.source.x as number) >= 0 && (value.source.y as number) >= 0
+      && (value.source.width as number) >= 2 && (value.source.height as number) >= 2
     case 'rect': case 'ellipse': return numbers(value, ['x', 'y', 'width', 'height']) && stroke && (value.fill === null || typeof value.fill === 'string')
     case 'highlight': return numbers(value, ['x', 'y', 'width', 'height']) && typeof value.color === 'string'
     case 'line': return numbers(value, ['x1', 'y1', 'x2', 'y2']) && stroke
@@ -129,7 +137,8 @@ export function restoreProject(content: ProjectContent): { draft: ProjectDraft; 
   try {
     const file = restoreFile(content.file)
     switch (content.tool) {
-      case 'edit': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map((el) => el.type === 'image' ? image(el) : el) } }, dispose }
+      case 'edit': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map((el) =>
+        el.type === 'image' ? image(el) : el.type === 'region' ? { ...el, sourcePage: el.sourcePage ?? el.page } : el) } }, dispose }
       case 'signatures': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map(image) } }, dispose }
       case 'organize': return { draft: { tool: content.tool, file, state: content.state }, dispose }
     }
@@ -138,7 +147,7 @@ export function restoreProject(content: ProjectContent): { draft: ProjectDraft; 
 
 export function checkProjectPages(state: ProjectStates[ProjectTool], total: number) {
   const entries = 'items' in state ? state.items : state.elements
-  if (entries.some((entry) => entry.page > total) || ('page' in state && state.page > total)) throw new Error(FORMAT_ERROR)
+  if (entries.some((entry) => entry.page > total || ('sourcePage' in entry && entry.sourcePage > total)) || ('page' in state && state.page > total)) throw new Error(FORMAT_ERROR)
 }
 
 export function projectError(error: unknown): string {

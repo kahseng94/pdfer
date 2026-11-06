@@ -10,6 +10,8 @@ export type Point = [number, number]
 export type Box = { x: number; y: number; width: number; height: number }
 
 export type FontFamily = 'sans' | 'serif' | 'mono'
+export type RegionRotation = 0 | 90 | 180 | 270
+export const REGION_ROTATIONS: RegionRotation[] = [0, 90, 180, 270]
 
 /** Same numbers as the backend: the first baseline below the top of a text box, and the line spacing, in ems. */
 export const TEXT_ASCENT = 0.9
@@ -41,6 +43,18 @@ export type ImageElement = Base & {
   /** Object URL for the preview; lives as long as the tool has the file open. */
   url: string
 }
+/** A cutout of the original page; the source never changes when it is moved or resized. */
+export type RegionElement = Base & Box & {
+  type: 'region'
+  sourcePage: number
+  source: Box
+  /** Clockwise quarter turns. Width and height describe the rotated visible box. */
+  rotation?: RegionRotation
+  /** An independent placement that never covers the original source. */
+  copy?: boolean
+  /** Keep the source covered without placing the cutout at its destination. */
+  deleted?: boolean
+}
 export type ShapeElement = Base & {
   type: 'rect' | 'ellipse'
   x: number
@@ -55,10 +69,10 @@ export type HighlightElement = Base & { type: 'highlight'; x: number; y: number;
 export type LineElement = Base & { type: 'line'; x1: number; y1: number; x2: number; y2: number; stroke: string; strokeWidth: number }
 export type DrawElement = Base & { type: 'draw'; points: Point[]; stroke: string; strokeWidth: number }
 
-export type Element = TextElement | ImageElement | ShapeElement | HighlightElement | LineElement | DrawElement
-export type BoxElement = ImageElement | ShapeElement | HighlightElement
+export type Element = TextElement | ImageElement | RegionElement | ShapeElement | HighlightElement | LineElement | DrawElement
+export type BoxElement = ImageElement | RegionElement | ShapeElement | HighlightElement
 
-export type Tool = 'select' | 'text' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw'
+export type Tool = 'select' | 'region' | 'text' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw'
 
 /** How new elements look. Restyling a selected element updates these too. */
 export type Style = {
@@ -212,6 +226,50 @@ export function boxBetween(a: Point, b: Point): Box {
   return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]) }
 }
 
+export function clampPoint(p: Point, page: { width: number; height: number }): Point {
+  return [Math.max(0, Math.min(p[0], page.width)), Math.max(0, Math.min(p[1], page.height))]
+}
+
+/** Keep a region entirely on its page, shrinking proportionally when requested. */
+export function constrainBox(box: Box, page: { width: number; height: number }, keepAspect = false): Box {
+  const scale = keepAspect ? Math.min(1, page.width / box.width, page.height / box.height) : 1
+  const width = Math.min(page.width, Math.max(MIN_SIZE, box.width * scale))
+  const height = Math.min(page.height, Math.max(MIN_SIZE, box.height * scale))
+  return { x: Math.max(0, Math.min(box.x, page.width - width)), y: Math.max(0, Math.min(box.y, page.height - height)), width, height }
+}
+
+/** Changing the destination never changes where the original cutout came from. */
+export function regionOnPage(region: RegionElement, page: number, size: { width: number; height: number }): RegionElement {
+  return { ...region, page, ...constrainBox(region, size, true) }
+}
+
+/** Rotate about the destination's center, fitting the new visible box on the page. */
+export function rotateRegion(region: RegionElement, rotation: RegionRotation, size: { width: number; height: number }): RegionElement {
+  if (rotation === (region.rotation ?? 0)) return region
+  const swap = Math.abs(rotation - (region.rotation ?? 0)) % 180 !== 0
+  const fitted = constrainBox({ x: 0, y: 0, width: swap ? region.height : region.width, height: swap ? region.width : region.height }, size, true)
+  const box = constrainBox({ ...fitted, x: region.x + region.width / 2 - fitted.width / 2, y: region.y + region.height / 2 - fitted.height / 2 }, size)
+  return { ...region, ...box, rotation }
+}
+
+export function copyRegionToPage(region: RegionElement, id: string, page: number, size: { width: number; height: number }): RegionElement {
+  const { deleted: _deleted, ...original } = region
+  const copy = regionOnPage({ ...original, id, copy: true }, page, size)
+  if (page !== region.page) return copy
+  // Reveal a same-page copy while keeping it inside the page. Near the
+  // right/bottom edge, offset in the opposite direction instead.
+  const offset = (position: number, limit: number) => {
+    if (position + 12 <= limit) return position + 12
+    if (position >= 12) return position - 12
+    return limit - position >= position ? limit : 0
+  }
+  return { ...copy, x: offset(copy.x, size.width - copy.width), y: offset(copy.y, size.height - copy.height) }
+}
+
+export function boxesOverlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1])
 }
@@ -232,12 +290,14 @@ type Common = { page: number }
 export type EditPayload =
   | (Common & { type: 'text'; x: number; y: number; text: string; size: number; color: string; family: FontFamily; bold: boolean; italic: boolean })
   | (Common & { type: 'image'; x: number; y: number; width: number; height: number; image: number })
+  | (Common & Box & { type: 'region'; sourcePage: number; source: Box; rotation?: RegionRotation; copy?: boolean; deleted?: boolean })
   | (Common & { type: 'rect' | 'ellipse'; x: number; y: number; width: number; height: number; stroke: string; strokeWidth: number; fill: string | null })
   | (Common & { type: 'highlight'; x: number; y: number; width: number; height: number; color: string })
   | (Common & { type: 'line'; x1: number; y1: number; x2: number; y2: number; stroke: string; strokeWidth: number })
   | (Common & { type: 'draw'; points: Point[]; stroke: string; strokeWidth: number })
 
 const round = (n: number) => Math.round(n * 100) / 100
+export const roundedBox = (box: Box): Box => ({ x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) })
 
 /** The edits as JSON for the backend, and the image files they refer to by index. */
 export function toPayload(elements: readonly Element[]): { edits: EditPayload[]; images: File[] } {
@@ -266,6 +326,8 @@ export function toPayload(elements: readonly Element[]): { edits: EditPayload[];
         }
         return { type: 'image', page: el.page, x: round(el.x), y: round(el.y), width: round(el.width), height: round(el.height), image: i }
       }
+      case 'region':
+        return { type: 'region', page: el.page, sourcePage: el.sourcePage, ...roundedBox(el), source: roundedBox(el.source), ...(el.rotation ? { rotation: el.rotation } : {}), ...(el.copy ? { copy: true } : {}), ...(el.deleted ? { deleted: true } : {}) }
       case 'rect':
       case 'ellipse':
         return { type: el.type, page: el.page, x: round(el.x), y: round(el.y), width: round(el.width), height: round(el.height), stroke: el.stroke, strokeWidth: el.strokeWidth, fill: el.fill }

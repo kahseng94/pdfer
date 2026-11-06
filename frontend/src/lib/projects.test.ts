@@ -24,6 +24,10 @@ describe('project snapshots', () => {
       { id: 'ellipse', type: 'ellipse', ...box, stroke: '#000000', strokeWidth: 1, fill: '#ffffff' },
       { id: 'line', type: 'line', page: 2, x1: 1, y1: 2, x2: 3, y2: 4, stroke: '#000000', strokeWidth: 2 },
       { id: 'draw', type: 'draw', page: 2, points: [[1, 2], [3, 4]], stroke: '#000000', strokeWidth: 2 },
+      { id: 'region', type: 'region', ...box, sourcePage: 2, source: { x: 10, y: 20, width: 150, height: 40 } },
+      { id: 'deleted-region', type: 'region', ...box, sourcePage: 1, deleted: true, source: { x: 30, y: 50, width: 50, height: 20 } },
+      { id: 'copied-region', type: 'region', ...box, sourcePage: 2, copy: true, source: { x: 10, y: 20, width: 150, height: 40 } },
+      { id: 'rotated-region', type: 'region', ...box, sourcePage: 2, copy: true, rotation: 270, source: { x: 10, y: 20, width: 150, height: 40 } },
     )
     rememberPdfPassword(draft.file, 'never-persist-this')
     const stored = structuredClone(serializeProject(draft))
@@ -83,6 +87,32 @@ describe('project snapshots', () => {
     content.state.elements = [{ id: 'bad', type: 'image', page: 1, x: 1, y: 1, width: 10, height: 10, image: 42 }]
     expect(() => restoreProject(content)).toThrow('damaged')
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed region geometry before restoring a project', () => {
+    const content = serializeProject(edit())
+    if (content.tool !== 'edit') throw new Error('Wrong tool')
+    const region = { id: 'region', type: 'region' as const, page: 1, x: 0, y: 0, width: 10, height: 20, source: { x: 0, y: 0, width: 10, height: 20 } }
+    for (const patch of [{ source: null }, { source: { ...region.source, width: NaN } }, { width: 0 }, { x: -5 }, { sourcePage: 0 }, { sourcePage: 1.5 }, { sourcePage: '2' }, { deleted: 'true' }, { deleted: 1 }, { deleted: null }, { copy: 'true' }, { copy: null }, { copy: true, deleted: true }, { rotation: 45 }, { rotation: -90 }, { rotation: '90' }, { rotation: false }, { rotation: null }]) {
+      expect(() => validateProject({ ...content, state: { ...content.state, elements: [{ ...region, ...patch }] } })).toThrow('damaged')
+    }
+  })
+
+  it('upgrades older same-page regions and checks both page references', () => {
+    const content = serializeProject(edit())
+    if (content.tool !== 'edit') throw new Error('Wrong tool')
+    const legacy = { id: 'region', type: 'region', page: 2, x: 0, y: 0, width: 10, height: 20, source: { x: 10, y: 20, width: 10, height: 20 } }
+    // Deliberately construct the format saved before sourcePage was introduced.
+    const stored = { ...content, state: { ...content.state, elements: [legacy] } }
+    validateProject(stored)
+    const restored = restoreProject(stored)
+    if (restored.draft.tool !== 'edit') throw new Error('Wrong tool')
+    expect(restored.draft.state.elements[0]).toMatchObject({ page: 2, sourcePage: 2, source: legacy.source })
+    const region = restored.draft.state.elements[0]
+    const state = restored.draft.state
+    expect(() => checkProjectPages({ ...state, elements: [{ ...region, page: 1 }] }, 1)).toThrow('damaged')
+    expect(() => checkProjectPages(restored.draft.state, 2)).not.toThrow()
+    restored.dispose()
   })
 })
 

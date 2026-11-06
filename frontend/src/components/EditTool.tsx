@@ -2,12 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { editPdf } from '../lib/api'
 import {
   DEFAULT_STYLE,
+  constrainBox,
+  copyRegionToPage,
   FONT_SIZES,
   imagePlacement,
+  moved,
+  regionOnPage,
+  REGION_ROTATIONS,
+  rotateRegion,
+  roundedBox,
   STROKE_WIDTHS,
   toPayload,
   type Element,
   type ImageElement,
+  type RegionElement,
+  type RegionRotation,
   type Style,
   type Tool,
 } from '../lib/edits'
@@ -19,6 +28,7 @@ import { closePdf, formatSize, type PDFDocumentProxy } from '../lib/pdf'
 import { usePdfLoader } from '../lib/usePdfLoader'
 import { useEditHistory } from '../lib/useEditHistory'
 import { useResult } from '../lib/result'
+import { placeDraggedRegion, regionScrollDelta, type RegionPageSurface } from '../lib/regionDrag'
 import { useWindowDrop } from '../lib/windowDrop'
 import { checkProjectPages, type ProjectDraft, type ProjectStates } from '../lib/projects'
 import { useProject } from '../lib/useProject'
@@ -33,6 +43,8 @@ import {
   LineIcon,
   PencilIcon,
   RedoIcon,
+  RegionIcon,
+  RotateIcon,
   SquareIcon,
   TrashIcon,
   TypeIcon,
@@ -44,7 +56,8 @@ import { Button, DropOverlay, ErrorMessage, FIELD, IconButton } from './ui'
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
 const TOOLS: { id: Tool; label: string; icon: Icon; hint: string }[] = [
-  { id: 'select', label: 'Select', icon: CursorIcon, hint: 'Click something you added to move it. Double-click text to change it.' },
+  { id: 'select', label: 'Select', icon: CursorIcon, hint: 'Click an added element or region to move it. Use Move region to select original PDF content.' },
+  { id: 'region', label: 'Move region', icon: RegionIcon, hint: 'Original page shown. Drag a rectangle around the content to move; shaded areas are already selected.' },
   { id: 'text', label: 'Text', icon: TypeIcon, hint: 'Click where the text should start.' },
   { id: 'highlight', label: 'Highlight', icon: HighlighterIcon, hint: 'Drag across what you want to mark.' },
   { id: 'rect', label: 'Rectangle', icon: SquareIcon, hint: 'Drag out a box.' },
@@ -79,6 +92,8 @@ export function EditTool({ active = true }: { active?: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
   const pageRefs = useRef(new Map<number, HTMLElement>())
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   // Object URLs of the pictures added, released when the file is closed.
   const urls = useRef<string[]>([])
@@ -90,6 +105,33 @@ export function EditTool({ active = true }: { active?: boolean }) {
     urls.current = []
   }, [])
 
+  const regionViewport = useCallback(() => {
+    const toolbar = toolbarRef.current?.getBoundingClientRect()
+    const actions = actionsRef.current?.getBoundingClientRect()
+    const top = toolbar?.height ? Math.max(0, Math.min(window.innerHeight, toolbar.bottom)) : 0
+    const bottom = actions?.height ? Math.min(window.innerHeight, Math.max(top, actions.top)) : window.innerHeight
+    return { top, bottom }
+  }, [])
+  const placeRegion: NonNullable<Editor['placeRegion']> = useCallback((original, client, grab, fallbackPage) => {
+    const { top, bottom } = regionViewport()
+    const view = container.current?.getBoundingClientRect()
+    const surfaces: RegionPageSurface[] = []
+    for (const [page, element] of pageRefs.current) {
+      const svg = element.querySelector<SVGSVGElement>('[data-editor-page]')
+      if (svg && pages[page - 1]) surfaces.push({ page, size: pages[page - 1], rect: svg.getBoundingClientRect() })
+    }
+    const x = view?.width ? Math.max(view.left, Math.min(client[0], view.right)) : client[0]
+    return placeDraggedRegion(original, [x, Math.max(top, Math.min(client[1], bottom))], grab, surfaces, fallbackPage)
+  }, [pages, regionViewport])
+  const scrollRegionDrag: NonNullable<Editor['scrollRegionDrag']> = useCallback((client, elapsedMs) => {
+    const { top, bottom } = regionViewport()
+    const dy = regionScrollDelta(client[1], top, bottom, elapsedMs)
+    if (!dy) return false
+    const before = window.scrollY
+    window.scrollBy({ top: dy, behavior: 'instant' })
+    return window.scrollY !== before
+  }, [regionViewport])
+
   const editor = useMemo<Editor>(
     () => ({
       select: setSelectedId,
@@ -100,8 +142,10 @@ export function EditTool({ active = true }: { active?: boolean }) {
       end: history.end,
       commit: history.commit,
       toolDone: () => setTool('select'),
+      placeRegion,
+      scrollRegionDrag,
     }),
-    [history.begin, history.change, history.end, history.commit],
+    [history.begin, history.change, history.end, history.commit, placeRegion, scrollRegionDrag],
   )
 
   function close() {
@@ -185,16 +229,69 @@ export function EditTool({ active = true }: { active?: boolean }) {
   const widest = Math.max(1, ...pages.map((p) => p.width))
   const zoom = (containerWidth > 0 ? containerWidth / widest : 1) * zoomLevel
 
-  const selected = useMemo(() => elements.find((el) => el.id === selectedId) ?? null, [elements, selectedId])
+  const selected = useMemo(() => elements.find((el) => el.id === selectedId && !(el.type === 'region' && el.deleted)) ?? null, [elements, selectedId])
+  const deletedRegions = useMemo(() => elements.filter((el): el is RegionElement => el.type === 'region' && el.deleted === true), [elements])
+  const regionCount = useMemo(() => elements.filter((el) => el.type === 'region').length, [elements])
   const byPage = useMemo(() => {
     const map = new Map<number, Element[]>()
-    for (const el of elements) map.set(el.page, [...(map.get(el.page) ?? []), el])
+    for (const el of elements) {
+      if (el.type !== 'region' || !el.deleted) map.set(el.page, [...(map.get(el.page) ?? []), el])
+    }
+    return map
+  }, [elements])
+  const sourcesByPage = useMemo(() => {
+    const map = new Map<number, RegionElement[]>()
+    for (const el of elements) {
+      if (el.type === 'region' && !el.copy) map.set(el.sourcePage, [...(map.get(el.sourcePage) ?? []), el])
+    }
     return map
   }, [elements])
 
-  const removeSelected = useCallback(() => {
+  function showRegionPage(page: number) {
+    const version = opening.current
+    // Measure after the selected region's controls have wrapped/reflowed.
+    requestAnimationFrame(() => {
+      if (opening.current !== version) return
+      const target = pageRefs.current.get(page)
+      if (!target) return
+      target.style.scrollMarginTop = `${(toolbarRef.current?.offsetHeight ?? 176) + 16}px`
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  function moveSelectedRegion(page: number) {
+    if (selected?.type !== 'region' || selected.page === page || !pages[page - 1]) return
+    const next = regionOnPage(selected, page, pages[page - 1])
+    commit((els) => els.map((el) => el.id === selected.id ? next : el))
+    setTool('select')
+    showRegionPage(page)
+  }
+
+  function copySelectedRegion(page: number) {
+    if (selected?.type !== 'region' || !pages[page - 1] || regionCount >= 200) return
+    const copy = copyRegionToPage(selected, crypto.randomUUID(), page, pages[page - 1])
+    commit((els) => [...els, copy])
+    setSelectedId(copy.id)
+    setTool('select')
+    if (page !== selected.page) showRegionPage(page)
+  }
+
+  function rotateSelectedRegion(rotation: RegionRotation) {
+    if (selected?.type !== 'region' || rotation === (selected.rotation ?? 0)) return
+    const next = rotateRegion(selected, rotation, pages[selected.page - 1])
+    commit((els) => els.map((el) => el.id === selected.id ? next : el))
+    setTool('select')
+  }
+
+  const restoreSelected = useCallback(() => {
     if (!selectedId) return
     commit((els) => els.filter((el) => el.id !== selectedId))
+    setSelectedId(null)
+  }, [commit, selectedId])
+
+  const deleteSelected = useCallback(() => {
+    if (!selectedId) return
+    commit((els) => els.flatMap((el) => el.id !== selectedId ? [el] : el.type === 'region' && !el.copy ? [{ ...el, deleted: true }] : []))
     setSelectedId(null)
   }, [commit, selectedId])
 
@@ -213,8 +310,14 @@ export function EditTool({ active = true }: { active?: boolean }) {
       } else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedId) {
           e.preventDefault()
-          removeSelected()
+          deleteSelected()
         }
+      } else if (!mod && selected?.type === 'region' && tool === 'select' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+        commit((els) => els.map((el) => el.id === selected.id ? { ...el, ...constrainBox(moved(selected, dx, dy), pages[selected.page - 1]) } : el))
       } else if (e.key === 'Escape') {
         if (tool !== 'select') setTool('select')
         else setSelectedId(null)
@@ -222,7 +325,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [active, doc, selectedId, tool, undo, redo, removeSelected])
+  }, [active, doc, selectedId, selected, pages, tool, undo, redo, deleteSelected, commit])
 
   /** The page nearest the middle of the window, where new pictures go. */
   function currentPage(): number {
@@ -360,11 +463,11 @@ export function EditTool({ active = true }: { active?: boolean }) {
       {doc && (
         <>
           <ProjectControls project={project} />
-          <div className="sticky top-0 z-20 -mx-4 space-y-2 bg-zinc-50/95 px-4 py-2 backdrop-blur dark:bg-zinc-950/95">
+          <div ref={toolbarRef} className="sticky top-0 z-20 -mx-4 space-y-2 bg-zinc-50/95 px-4 py-2 backdrop-blur dark:bg-zinc-950/95">
             <div className="flex flex-wrap items-center gap-2">
               <div role="toolbar" aria-label="Tools" className="inline-flex flex-wrap rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800/70">
                 {TOOLS.map((t) => (
-                  <ToolButton key={t.id} label={t.label} icon={t.icon} pressed={tool === t.id} onClick={() => setTool(t.id)} />
+                  <ToolButton key={t.id} label={t.label} icon={t.icon} pressed={tool === t.id} onClick={() => { setTool(t.id); if (t.id === 'region') setSelectedId(null) }} />
                 ))}
                 <ToolButton label="Image" icon={ImageIcon} pressed={false} onClick={() => imageInput.current?.click()} />
               </div>
@@ -405,29 +508,45 @@ export function EditTool({ active = true }: { active?: boolean }) {
               )}
               {(subject === 'rect' || subject === 'ellipse' || subject === 'line' || subject === 'draw') && (
                 <StrokeControls
-                  value={selected && selected.type !== 'text' && selected.type !== 'image' && selected.type !== 'highlight' ? selected : style}
+                  value={selected && selected.type !== 'text' && selected.type !== 'image' && selected.type !== 'region' && selected.type !== 'highlight' ? selected : style}
                   withFill={subject === 'rect' || subject === 'ellipse'}
                   onChange={restyle}
                 />
               )}
               {subject === 'image' && <span>Drag a corner to resize. Hold Shift to stretch.</span>}
+              {selected?.type === 'region' && <RegionControls value={selected} pages={pages} onPageChange={moveSelectedRegion} onCopy={copySelectedRegion} onRotate={rotateSelectedRegion} copyDisabled={regionCount >= 200} onChange={(patch) => {
+                const box = constrainBox({ ...selected, ...patch }, pages[selected.page - 1])
+                commit((els) => els.map((el) => el.id === selected.id ? { ...el, ...box } : el))
+              }} />}
               {!selected && <span>{TOOLS.find((t) => t.id === tool)?.hint}</span>}
-              {selected && (
+              {selected && <div className="ml-auto flex items-center gap-2">
+                {selected.type === 'region' && !selected.copy && <button type="button" onClick={restoreSelected}
+                  className="rounded px-2 py-1 text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+                  Restore original
+                </button>}
                 <button
                   type="button"
-                  onClick={removeSelected}
-                  className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  onClick={deleteSelected}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-rose-600 hover:bg-rose-100 dark:text-rose-400 dark:hover:bg-rose-950"
                 >
                   <TrashIcon className="size-4" />
-                  Delete
+                  {selected.type === 'region' ? selected.copy ? 'Delete copy' : 'Delete region' : 'Delete'}
                 </button>
-              )}
+              </div>}
             </div>
           </div>
 
+          {(tool === 'region' || elements.some((el) => el.type === 'region')) && <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Drag a region directly onto another page; hold near the top or bottom edge to scroll. Move to page also changes pages. Copy region makes an independent copy. Regions shrink to fit the page when needed.
+            {' '}Arrow keys move the selection; Shift moves it faster.
+            {' '}Delete region leaves its source covered; Delete copy removes only that copy. Restore original cancels a move.
+            {' '}Vacated areas become white. Original content remains in the file; use Redact to remove sensitive information.
+            {' '}Links, annotations and form fields cannot be moved with a region.
+          </p>}
+
           <div className="flex items-baseline justify-between gap-4">
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              {count === 0 ? 'Nothing added yet' : `${count} ${count === 1 ? 'edit' : 'edits'}`}
+              {count === 0 ? 'No edits yet' : `${count} ${count === 1 ? 'edit' : 'edits'}`}
             </p>
             {count > 0 && (
               <button
@@ -443,6 +562,19 @@ export function EditTool({ active = true }: { active?: boolean }) {
             )}
           </div>
 
+          {deletedRegions.length > 0 && <details className="rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800">
+            <summary className="cursor-pointer font-medium">Deleted regions ({deletedRegions.length})</summary>
+            <ul className="mt-3 space-y-2">
+              {deletedRegions.map((region, i) => <li key={region.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>Page {region.sourcePage} · {Math.round(region.source.width)} × {Math.round(region.source.height)} pt at {Math.round(region.source.x)}, {Math.round(region.source.y)}</span>
+                <button type="button" aria-label={`Restore deleted region ${i + 1} on page ${region.sourcePage}`}
+                  onClick={() => commit((els) => els.filter((el) => el.id !== region.id))} className="text-rose-600 hover:underline dark:text-rose-400">
+                  Restore original
+                </button>
+              </li>)}
+            </ul>
+          </details>}
+
           <div ref={container} className="overflow-x-auto">
             <ol className="space-y-6 py-1">
               {pages.map((size, i) => {
@@ -454,7 +586,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
                       if (el) pageRefs.current.set(page, el)
                       else pageRefs.current.delete(page)
                     }}
-                    className="mx-auto w-fit"
+                    className="mx-auto w-fit scroll-mt-48"
                   >
                     <EditPage
                       doc={doc}
@@ -462,6 +594,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
                       size={size}
                       zoom={zoom}
                       elements={byPage.get(page) ?? []}
+                      sourceRegions={sourcesByPage.get(page) ?? []}
                       selectedId={selectedId}
                       editingId={editingId}
                       tool={tool}
@@ -492,10 +625,10 @@ export function EditTool({ active = true }: { active?: boolean }) {
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {doc && (
-        <div className="sticky bottom-4 space-y-2">
+        <div ref={actionsRef} className="sticky bottom-4 space-y-2">
           {result.value && <ResultCard file={result.value} from="edit" onDismiss={result.clear} />}
           <Button onClick={save} disabled={busy || count === 0 || unwritable.length > 0}>
-            {busy ? 'Saving…' : count === 0 ? 'Add something first' : `Save with ${count} ${count === 1 ? 'edit' : 'edits'}`}
+            {busy ? 'Saving…' : count === 0 ? 'Make an edit first' : `Save with ${count} ${count === 1 ? 'edit' : 'edits'}`}
           </Button>
         </div>
       )}
@@ -513,6 +646,57 @@ export function EditTool({ active = true }: { active?: boolean }) {
       />
     </div>
   )
+}
+
+function RegionControls({ value, pages, onPageChange, onCopy, onRotate, copyDisabled, onChange }: {
+  value: RegionElement
+  pages: PageSize[]
+  onPageChange: (page: number) => void
+  onCopy: (page: number) => void
+  onRotate: (rotation: RegionRotation) => void
+  copyDisabled: boolean
+  onChange: (patch: Partial<RegionElement>) => void
+}) {
+  const box = roundedBox(value)
+  const rotation = value.rotation ?? 0
+  const [preferredCopyPage, setPreferredCopyPage] = useState(0)
+  const targets = pages.flatMap((size, i) => size.width >= 2 && size.height >= 2 ? [i + 1] : [])
+  const copyPage = targets.includes(preferredCopyPage) ? preferredCopyPage : targets.find((page) => page > value.page) ?? targets[0] ?? 0
+  return <>
+    <label className="inline-flex items-center gap-1.5">
+      Move to page
+      <select aria-label="Move region to page" className={FIELD} value={value.page} onChange={(event) => onPageChange(Number(event.target.value))}>
+        {pages.map((size, i) => <option key={i + 1} value={i + 1} disabled={size.width < 2 || size.height < 2}>Page {i + 1}</option>)}
+      </select>
+    </label>
+    <span>{value.copy ? 'Copy of page' : 'From page'} {value.sourcePage}</span>
+    <label className="inline-flex items-center gap-1.5">
+      Copy to page
+      <select aria-label="Region copy page" className={FIELD} value={copyPage || ''} disabled={!targets.length || copyDisabled} onChange={(event) => setPreferredCopyPage(Number(event.target.value))}>
+        {!targets.length && <option value="">No available page</option>}
+        {targets.map((page) => <option key={page} value={page}>Page {page}{page === value.page ? ' (current)' : ''}</option>)}
+      </select>
+    </label>
+    <button type="button" onClick={() => onCopy(copyPage)} disabled={!copyPage || copyDisabled} className="rounded border border-zinc-300 px-2 py-1 text-zinc-800 hover:bg-zinc-200/70 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+      Copy region
+    </button>
+    <span className="inline-flex items-center gap-1.5">
+      <label className="inline-flex items-center gap-1.5">Rotation
+        <select aria-label="Region rotation" value={rotation} onChange={(event) => onRotate(Number(event.target.value) as RegionRotation)} className={FIELD}>
+          {REGION_ROTATIONS.map((angle) => <option key={angle} value={angle}>{angle}°</option>)}
+        </select>
+      </label>
+      <IconButton label="Rotate region left" onClick={() => onRotate(((rotation + 270) % 360) as RegionRotation)}><RotateIcon className="size-4 -scale-x-100" /></IconButton>
+      <IconButton label="Rotate region right" onClick={() => onRotate(((rotation + 90) % 360) as RegionRotation)}><RotateIcon className="size-4" /></IconButton>
+    </span>
+    {(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key} className="inline-flex items-center gap-1.5">
+      {{ x: 'Left', y: 'Top', width: 'Width', height: 'Height' }[key]}
+      <input aria-label={`Region ${key}`} type="number" min={key === 'x' || key === 'y' ? 0 : 2} step="1" value={box[key]}
+        onChange={(event) => { if (event.target.value !== '' && Number.isFinite(event.target.valueAsNumber)) onChange({ [key]: event.target.valueAsNumber }) }}
+        className={`${FIELD} w-20`} />
+    </label>)}
+    <span>pt · Hold Shift while resizing to stretch.</span>
+  </>
 }
 
 /** The element with the parts of the style that apply to it. */

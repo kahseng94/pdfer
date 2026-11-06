@@ -74,6 +74,12 @@ export const CursorIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const RegionIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 9V3h6M15 3h6v6M3 15v6h6M21 15v6h-6M8 12h8m-3-3 3 3-3 3" />
+  </Icon>
+)
+
 export const TypeIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 7V4h16v3M9 20h6M12 4v16" />
