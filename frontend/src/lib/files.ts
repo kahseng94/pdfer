@@ -1,6 +1,6 @@
 // Which files each tool takes. Shared by the Dropzone, window drops and paste.
 
-export type FileKind = 'pdf' | 'image' | 'compressible'
+export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'compressible'
 
 type KindSpec = {
   /** The `accept` attribute for a file input. */
@@ -28,6 +28,27 @@ const IMAGE: KindSpec = {
 export const FILE_KINDS: Record<FileKind, KindSpec> = {
   pdf: PDF,
   image: IMAGE,
+  png: {
+    accept: 'image/png,.png', one: 'a PNG image', many: 'PNG images',
+    is: (f) => f.type === 'image/png' || /\.png$/i.test(f.name),
+  },
+  jpg: {
+    accept: 'image/jpeg,.jpg,.jpeg', one: 'a JPG image', many: 'JPG images',
+    is: (f) => f.type === 'image/jpeg' || /\.jpe?g$/i.test(f.name),
+  },
+  // Office conversion requires a supported extension, even if the OS omits MIME.
+  word: {
+    accept: '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    one: 'a Word document', many: 'Word documents', is: (f) => /\.docx?$/i.test(f.name),
+  },
+  excel: {
+    accept: '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    one: 'an Excel workbook', many: 'Excel workbooks', is: (f) => /\.xlsx?$/i.test(f.name),
+  },
+  powerpoint: {
+    accept: '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    one: 'a PowerPoint presentation', many: 'PowerPoint presentations', is: (f) => /\.pptx?$/i.test(f.name),
+  },
   /** What the Compress tool takes: a PDF, or pictures including WebP. */
   compressible: {
     accept: `${PDF.accept},${IMAGE.accept},image/webp,.webp`,

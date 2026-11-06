@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
+Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Desktop app
@@ -17,6 +17,7 @@ signing, local data, and the GitHub release workflow.
 
 - Node 24 and [pnpm](https://pnpm.io/) for the frontend and desktop build
 - [uv](https://docs.astral.sh/uv/) for the backend (installs Python 3.14 for you if needed)
+- [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) with Writer, Calc and Impress for Office-to-PDF conversion (optional; PNG/JPG and other PDF tools do not need it)
 
 ## Use it
 
@@ -606,9 +607,41 @@ Image compression keeps its separate workflow. If a drop contains both PDFs
 and images, all PDFs are added and the skipped images are reported; add the
 images separately to compress them.
 
+### Word, Excel and PowerPoint to PDF
+
+Choose **Word to PDF** (`.doc`, `.docx`), **Excel to PDF** (`.xls`, `.xlsx`),
+or **PowerPoint to PDF** (`.ppt`, `.pptx`). Drop or browse for one file, then
+press **Convert to PDF**. The result opens in a PDF preview; **Download PDF**
+saves those exact bytes, and **Open in** sends the PDF to another tool.
+Choosing another file, removing the source, or cancelling discards the old
+result. Each tab keeps its own source and preview while switching tools.
+
+Conversion runs locally using a separately installed LibreOffice. If it is
+missing, the tab shows setup instructions and **Check again**. Standard macOS
+and Windows installation locations and executables on PATH are detected.
+For a custom installation, set `PDFER_LIBREOFFICE` to the full path of the
+`soffice` executable before starting pdfer. LibreOffice is not included in
+desktop installers. PNG/JPG conversion works without it.
+
+Word follows document pagination; Excel follows print areas, page breaks and
+scaling; PowerPoint exports slides without animations, transitions, hidden
+slides or speaker notes. Installed fonts and LibreOffice's Office-format
+support can affect layout. Review the output before downloading. For an
+Excel workbook, set the desired print layout in Excel before converting.
+Password-protected files must first be saved as unprotected copies in Office.
+Macro-enabled extensions (`.docm`, `.xlsm`, `.pptm`) are not accepted.
+
+Sources are limited to 128 MiB, expanded Office packages to 512 MiB, and
+output PDFs to 256 MiB. Two conversions can run at once; others wait.
+Conversions time out after three minutes. Cancellation or disconnect stops
+the converter. Each job uses temporary files and a separate LibreOffice
+profile with macros disabled; temporary data is removed on success or failure.
+The converter uses LibreOffice's documented [command-line PDF export](https://help.libreoffice.org/latest/en-US/text/shared/guide/pdf_params.html).
+
 ### Images to PDF layouts
 
-Use **Images to PDF** to put one image on each page, in the order shown.
+Use **PNG to PDF** for PNGs, **JPG to PDF** for `.jpg`/`.jpeg` files, or
+**Images to PDF** for a mix. Each puts one image on each page, in the order shown.
 Drag the images to reorder them. The default layout is A4 portrait with
 10 mm margins and **Fit whole image**. A4 and Letter both support portrait
 or landscape orientation, and equal margins from 0–100 mm on all four sides.
@@ -784,6 +817,8 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/compress` | `file`, `level`, optional `password`, optional `max_bytes` (integer, 1,000–500,000,000) | `<name>_compressed.pdf`, with measured `X-Original-Size` and `X-Compressed-Size`; target requests also return `X-Target-Size` and `X-Target-Met` (`true`/`false`) |
 | `POST /api/compress-images` | `files` (1 or more), `level`, `format`, `max_kb` | `<name>_compressed.<ext>`, or a zip if there are several, with the same size headers plus `X-Results` |
 | `POST /api/images` | `files` (JPEG or PNG, 1 or more, in order), optional `paper`, `orientation`, `margin_mm`, `fit` | `images.pdf`, one page per image; the same file is previewed and downloaded |
+| `GET /api/office/status` | | JSON: `available`, `message`; checks the local LibreOffice installation |
+| `POST /api/office` | `file`, `kind` (`word`, `excel`, `powerpoint`) | `<name>.pdf`; converts one matching Office document locally |
 | `POST /api/photo` | `file` (JPEG or PNG), `crop`, `width`, `height`, `dpi`, `max_kb` | `<name>_passport.jpg`, a JPEG of `width` × `height` pixels |
 | `POST /api/photo-sheet` | `file`, `crop`, `photo_width`, `photo_height`, `paper` | `<name>_passport_sheet.pdf`, with an `X-Copies` header |
 

@@ -10,6 +10,13 @@ and pinned models into the app's data folder. After setup it runs offline.
 It needs several GB of disk space and is offered on Apple Silicon, Windows x64,
 and Linux x64. Intel Macs can use the included Tesseract engine.
 
+Word, Excel and PowerPoint conversion requires a separate LibreOffice installation
+with Writer, Calc and Impress. The conversion tabs detect it and provide **Check
+again** after installation. Standard macOS and Windows locations and PATH are
+searched; `PDFER_LIBREOFFICE` can specify a custom executable before app launch.
+LibreOffice is not bundled in pdfer installers. PNG and JPG conversion needs no
+additional software. All conversion and temporary files stay on this computer.
+
 ## Development and local installers
 
 The Mac installers require macOS 15 or newer, matching the bundled PDF engine.
