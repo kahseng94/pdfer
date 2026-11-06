@@ -8,6 +8,7 @@ export const TOOLS = [
   { id: 'organize', label: 'Organize', takes: 'pdf' },
   { id: 'bookmarks', label: 'Bookmarks', takes: 'pdf' },
   { id: 'text', label: 'Search & text', takes: 'pdf' },
+  { id: 'compare', label: 'Compare PDFs', takes: 'pdf' },
   { id: 'ocr', label: 'OCR', takes: 'pdf' },
   { id: 'edit', label: 'Edit', takes: 'pdf' },
   { id: 'forms', label: 'Fill forms', takes: 'pdf' },
