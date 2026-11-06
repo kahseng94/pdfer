@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, search, OCR, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
+Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Requirements
@@ -252,6 +252,68 @@ names for duplicate filenames. Multiple results also get a ZIP containing
 those exact PDFs. Preview individual files and pages, download a PDF, or
 send it directly to another tool. Downloading always requires an explicit
 click. Presets persist; open inputs, results and unfinished runs do not.
+
+### Compare PDFs
+
+Open **Compare PDFs** and choose an **Original** and **Revised** PDF. Each
+protected input prompts for its own password using the usual session-only
+password handling. A single window drop or **Open in Compare PDFs** handoff
+fills Original first, then fills or replaces Revised. Dropping two files
+replaces both in file order; the labeled input areas replace only their side.
+
+Press **Compare PDFs** to compare actual pdf.js-rendered pages locally in the
+browser. The tool does not compare file bytes: different PDF stream encodings
+with the same rendered content and text compare as unchanged. Blank and scanned
+pages work without OCR. Extractable text is also compared, so changes in an
+invisible OCR layer can be reported even when page images look identical.
+
+Pages pair strictly by number: original page 1 with revised page 1, and so on.
+There is **no automatic page alignment or semantic interpretation**. A middle
+insertion may change all following pairs. A page without a counterpart at the
+same number is marked **added** or **removed**, including blank pages. Other
+pairs are **unchanged** or **changed** based on visible content, displayed page
+dimensions, and extracted text. Metadata and whitespace-only text changes are
+ignored. Reading order can vary in columns, tables and OCR layers.
+
+Both previews share page navigation and a physical scale, aligned at their
+visible top-left corners. Crop boxes, rotation and PDF UserUnit scaling are
+respected; different page sizes are never stretched to match. Pink regions
+show visual differences on both sides. **Previous difference** and **Next
+difference** wrap through visual regions, dimension changes, text changes and
+added/removed pages; orange marks the selected visual region or page boundary.
+The page selector includes every page's status, including unchanged pairs.
+Readable **Removed** and **Added** blocks show literal text changes. Missing
+or excessive text is clearly flagged as visual-only comparison.
+
+The default is **96 DPI / Balanced**: color-channel changes up to 24/255 and
+isolated groups smaller than four pixels are ignored. Precise uses 8/255 and
+one pixel; Relaxed uses 48/255 and twelve pixels. These settings can miss tiny
+or low-contrast changes; unchanged means no differences detected at the chosen
+resolution and tolerance. Use 144 DPI / Precise to inspect finer details.
+Changed pixels are grouped into adjacent 12-pixel tiles; over 200 regions on
+one page are shown as a combined bounding region. Long text replacements use
+one block to bound diff computation.
+
+Processing runs one page pair at a time, with progress and cancellation.
+Only the current pair's rasters are kept while comparing; completed results
+store small region coordinates and text edits. Previews render the selected
+pair on demand. Preview and comparison renders share a queue, including the
+cleanup of cancelled renders. PDF.js document caches are released between
+pairs. Text extraction reads bounded chunks and cancels its stream on a limit
+or cancellation, without first accumulating the whole page. Limits are
+100 MB and 1000 pages per input, 2 million pixels
+and 2400 pixels per side per rendered pair, 1 billion cumulative pair pixels,
+100,000 extracted characters / 50,000 text items per page and 4 million total
+extracted characters. Large pages automatically use a lower DPI, shown in the
+results. PDF.js parsing and decoded source images can require additional memory.
+Split large or unusually complex PDFs into smaller documents when necessary.
+
+Replacing either input or changing comparison settings cancels work and clears
+old results. Cancelled or failed runs never offer a partial report. Downloading
+the optional comparison TXT requires an explicit click; it includes statuses,
+text edits and geometry summaries, but no preview images or passwords. Text
+reports from protected PDFs are unencrypted. The originals are never modified,
+and this tool makes no backend requests or external uploads.
 
 ### Search and extract text
 
@@ -570,7 +632,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
   src/components/OcrTool.tsx OCR languages, ranges, progress and preview
@@ -584,6 +646,12 @@ Batch PDF compression calls the existing `/api/compress` endpoint sequentially,
 with each file's password, and packages the returned PDFs locally with `fflate`.
 Text search and TXT export use the existing pdf.js parser and text layer in
 the browser, so no backend endpoint or OCR dependency is needed.
+PDF comparison uses that same parser and renderer, with bounded sequential
+pixel comparison and literal text diffs in `frontend/src/lib/pdfCompare.ts`.
+Its tests render real PDF fixtures (including scans, invisible text, different
+stream encodings, geometry changes and independent encrypted inputs), using
+PDF.js's existing optional canvas dependency for Node tests; the app uses the
+browser canvas. Lifecycle tests cover cancellation, replacement and stale results.
 Workflows compose the existing stamp, compress and protect endpoints. Presets
 use a validated, versioned browser-storage record; run credentials are kept
 separate. Results are packaged locally with `fflate` after every file succeeds.

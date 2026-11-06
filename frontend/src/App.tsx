@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { HandoffContext, type Delivery } from './lib/handoff'
 import { loadTool, saveTool } from './lib/lastTool'
 import { TOOL_IDS, TOOLS, type ToolId } from './lib/tools'
@@ -25,6 +25,8 @@ import { RedactTool } from './components/RedactTool'
 import { ProjectsPanel } from './components/ProjectsPanel'
 import { ProjectContext, useProjectManager } from './lib/useProject'
 
+const CompareTool = lazy(() => import('./components/CompareTool').then((module) => ({ default: module.CompareTool })))
+
 export default function App() {
   const [tool, setTool] = useState<ToolId>(() => loadTool(TOOL_IDS, 'merge'))
   const [delivery, setDelivery] = useState<Delivery | null>(null)
@@ -47,7 +49,7 @@ export default function App() {
     <HandoffContext value={{ delivery, send }}>
       <ProjectContext value={projects}>
         <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-          <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+          <main className={`mx-auto ${tool === 'compare' ? 'max-w-6xl' : 'max-w-3xl'} px-4 py-10 sm:py-14`}>
             <header className="mb-8 flex items-center gap-3">
               <LogoIcon className="size-9" />
               <div>
@@ -97,6 +99,9 @@ export default function App() {
             </section>
             <section id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden={tool !== 'text'}>
               <TextTool active={tool === 'text'} />
+            </section>
+            <section id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden={tool !== 'compare'}>
+              <Suspense fallback={<p role="status">Loading comparison tool…</p>}><CompareTool active={tool === 'compare'} /></Suspense>
             </section>
             <section id="panel-ocr" role="tabpanel" aria-labelledby="tab-ocr" hidden={tool !== 'ocr'}>
               <OcrTool active={tool === 'ocr'} />

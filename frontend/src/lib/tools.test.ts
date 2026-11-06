@@ -6,9 +6,9 @@ const ids = (f: File, from: Parameters<typeof targetsFor>[1]) => targetsFor(f, f
 
 describe('targetsFor', () => {
   it('offers a PDF to every PDF tool but the one that made it', () => {
-    expect(ids(file('merged.pdf', 'application/pdf'), 'merge')).toEqual(['split', 'organize', 'bookmarks', 'metadata', 'text', 'ocr', 'edit', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
-    expect(ids(file('a_edited.pdf'), 'edit')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'ocr', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
-    expect(ids(file('images.pdf', 'application/pdf'), 'images')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'ocr', 'edit', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('merged.pdf', 'application/pdf'), 'merge')).toEqual(['split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('a_edited.pdf'), 'edit')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('images.pdf', 'application/pdf'), 'images')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'forms', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
   })
 
   it('offers JPEG and PNG pictures to the picture tools', () => {
@@ -27,6 +27,9 @@ it('registers metadata for persisted navigation and both directions of PDF hando
   expect(ids(file('source.pdf'), 'passwords')).toContain('metadata')
   expect(ids(file('source_metadata.pdf'), 'metadata')).toContain('bookmarks')
   expect(ids(file('source_metadata.pdf'), 'metadata')).toContain('ocr')
+  expect(ids(file('source_metadata.pdf'), 'metadata')).toContain('compare')
+  expect(ids(file('source_compressed.pdf'), 'compress')).toContain('metadata')
+  expect(ids(file('source_compressed.pdf'), 'compress')).toContain('compare')
   expect(ids(file('source_metadata.pdf'), 'metadata')).not.toContain('metadata')
   expect(ids(file('image.png', 'image/png'), 'photo')).not.toContain('metadata')
 })
