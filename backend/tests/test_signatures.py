@@ -63,7 +63,10 @@ def test_import_respects_exif_rotation_and_limits_dimensions():
     assert saved.data == prepared.data
 
 
-@pytest.mark.parametrize("data, remove_white", [(b"not an image", False), (b"x" * (core.MAX_SIGNATURE_UPLOAD+1), False)])
+@pytest.mark.parametrize("data, remove_white", [
+    pytest.param(b"not an image", False, id="invalid-image"),
+    pytest.param(b"x" * (core.MAX_SIGNATURE_UPLOAD+1), False, id="oversized-upload"),
+])
 def test_bad_signature_images_are_rejected(data, remove_white):
     with pytest.raises(core.PdfToolError): core.prepare_signature(data, remove_white=remove_white)
 
