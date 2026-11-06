@@ -252,7 +252,11 @@ one block to bound diff computation.
 Processing runs one page pair at a time, with progress and cancellation.
 Only the current pair's rasters are kept while comparing; completed results
 store small region coordinates and text edits. Previews render the selected
-pair on demand. Limits are 100 MB and 1000 pages per input, 2 million pixels
+pair on demand. Preview and comparison renders share a queue, including the
+cleanup of cancelled renders. PDF.js document caches are released between
+pairs. Text extraction reads bounded chunks and cancels its stream on a limit
+or cancellation, without first accumulating the whole page. Limits are
+100 MB and 1000 pages per input, 2 million pixels
 and 2400 pixels per side per rendered pair, 1 billion cumulative pair pixels,
 100,000 extracted characters / 50,000 text items per page and 4 million total
 extracted characters. Large pages automatically use a lower DPI, shown in the

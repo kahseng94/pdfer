@@ -4,7 +4,7 @@ import { pickFiles } from '../lib/files'
 import { useReceive } from '../lib/handoff'
 import { pdfPassword } from '../lib/passwords'
 import { closePdf, formatSize, type PDFDocumentProxy } from '../lib/pdf'
-import { COMPARE_LIMITS, COMPARE_RESOLUTIONS, DEFAULT_COMPARE, comparePdfs, comparisonReport, differences, type CompareProgress, type CompareSettings, type ComparisonPage } from '../lib/pdfCompare'
+import { COMPARE_LIMITS, COMPARE_RESOLUTIONS, DEFAULT_COMPARE, comparePdfs, comparisonReport, createComparisonScheduler, differences, type CompareProgress, type CompareSettings, type ComparisonPage } from '../lib/pdfCompare'
 import { textFile } from '../lib/pdfText'
 import { usePdfLoader } from '../lib/usePdfLoader'
 import { useWindowDrop } from '../lib/windowDrop'
@@ -34,7 +34,7 @@ export function CompareTool({ active = true }: { active?: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const pending = useRef<AbortController | null>(null)
-  const settled = useRef<Promise<void>>(Promise.resolve())
+  const [schedule] = useState(createComparisonScheduler)
   const [revision, setRevision] = useState(0)
   const found = useMemo(() => differences(pages ?? []), [pages])
   const current = selected === null ? undefined : found[selected]
@@ -93,15 +93,12 @@ export function CompareTool({ active = true }: { active?: boolean }) {
     invalidate()
     const controller = new AbortController(), { signal } = controller
     pending.current = controller; setBusy(true); setPage(1)
-    // A quick cancel/retry cannot overlap old raster allocations or page cleanup.
-    const previous = settled.current
-    settled.current = (async () => {
+    // Also wait for preview renders to settle before using/cleaning their PDF resources.
+    void (async () => {
       try {
-        await previous
-        signal.throwIfAborted()
-        const result = await comparePdfs(original.doc!, revised.doc!, settings, {
+        const result = await schedule(signal, () => comparePdfs(original.doc!, revised.doc!, settings, {
           signal, onProgress: (value) => { if (pending.current === controller && !signal.aborted) setProgress(value) },
-        })
+        }))
         if (pending.current !== controller || signal.aborted) return
         setPages(result)
         const first = differences(result)[0]
@@ -188,7 +185,7 @@ export function CompareTool({ active = true }: { active?: boolean }) {
         <p className="text-xs text-zinc-500">{currentPage.regions.length} highlighted regions · {currentPage.dpi.toFixed(1)} effective DPI. Pink marks visual changes on both sides; orange marks the selected region or changed page boundary.</p>
         {currentPage.groupedRegions && <p>Many visual regions were grouped into one bounding area.</p>}
       </div>}
-      {active && <ComparePreview key={`${revision}:${page}:${!!inputs.original.doc}:${!!inputs.revised.doc}`} original={inputs.original.doc} revised={inputs.revised.doc} page={page} result={currentPage} selected={current} dpi={settings.dpi} />}
+      {active && <ComparePreview key={`${revision}:${page}:${!!inputs.original.doc}:${!!inputs.revised.doc}`} original={inputs.original.doc} revised={inputs.revised.doc} page={page} result={currentPage} selected={current} dpi={settings.dpi} schedule={schedule} />}
       {currentPage && <section aria-label="Text differences" className={`space-y-3 rounded-lg border p-3 ${current?.kind === 'text' ? 'border-orange-500' : 'border-zinc-300 dark:border-zinc-700'}`}>
         <h3 className="font-medium">Text additions and removals</h3>
         <p className="text-xs text-zinc-500">Literal words in extracted reading order; spacing and line breaks are ignored. Columns, tables and OCR layers can have unusual reading order. No OCR or semantic interpretation is performed.</p>

@@ -59,6 +59,8 @@ it('compares rendered content, including identical PDFs with different stream en
   expect(differences(result)).toEqual([])
   expect(result[1].originalHasText).toBe(false)
   expect(releases.every((released) => released())).toBe(true)
+  // Document cleanup must not break fonts/images when another run or preview reopens a page.
+  expect((await comparePdfs(a, b, DEFAULT_COMPARE, options())).map((p) => p.status)).toEqual(['unchanged', 'unchanged', 'unchanged'])
 })
 
 it('detects visible edits, scanned image changes and invisible text-only differences', async () => {
@@ -98,6 +100,15 @@ it('uses displayed crop, rotation and UserUnit geometry at a shared physical sca
   expect(result[2].geometryChanged).toBe(false)
   expect(result[2].regions.length).toBeGreaterThan(0)
   expect(result.every((p) => p.status === 'changed')).toBe(true)
+})
+
+it('keeps content outside the smaller page crop box out of the shared comparison canvas', async () => {
+  const original = await open([{ stream: '150 30 30 30 re f', geometry: '/MediaBox [0 0 200 150] /CropBox [0 0 100 100]' }])
+  const revised = await open([{}])
+  const [result] = await comparePdfs(original, revised, DEFAULT_COMPARE, options())
+  expect(result.geometryChanged).toBe(true)
+  expect(result.regions).toEqual([])
+  expect(result.changedPixels).toBe(0)
 })
 
 it('cancels between pairs, releases canvases, and returns no partial result', async () => {

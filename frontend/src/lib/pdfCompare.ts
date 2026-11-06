@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy } from './pdf'
+import type { TextContent } from 'pdfjs-dist/types/src/display/api'
 import { pageText } from './pdfText'
 
 export const COMPARE_LIMITS = {
@@ -28,6 +29,55 @@ const browserCanvas: CanvasFactory = () => document.createElement('canvas')
 // Yield between pixel strips and pages so Cancel and replacement inputs stay responsive.
 const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+export type ComparisonScheduler = <T>(signal: AbortSignal, work: () => Promise<T>) => Promise<T>
+/** Share one queue between previews and runs, including renders still settling after cancellation. */
+export function createComparisonScheduler(): ComparisonScheduler {
+  let settled: Promise<void> = Promise.resolve()
+  return (signal, work) => {
+    const next = settled.then(() => { signal.throwIfAborted(); return work() })
+    settled = next.then(() => {}, () => {})
+    return next
+  }
+}
+
+/** Called only inside the shared scheduler, after all page renders have settled. */
+export async function cleanupComparisonDocuments(original: PDFDocumentProxy | null, revised: PDFDocumentProxy | null, signal: AbortSignal) {
+  for (const doc of new Set([original, revised])) {
+    signal.throwIfAborted()
+    if (!doc) continue
+    for (let attempt = 0; ; attempt++) {
+      try { await doc.cleanup(); break }
+      catch (reason) {
+        signal.throwIfAborted()
+        // PDF.js delays cancellation of an unfinished operator stream by 100 ms,
+        // even after RenderTask.promise has rejected. Give that cleanup time to finish.
+        if (attempt >= 25 || !/^startCleanup: Page \d+ is currently rendering\.$/.test((reason as Error).message)) throw reason
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); reject(signal.reason) }
+          const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, 20)
+          signal.addEventListener('abort', abort, { once: true })
+        })
+      }
+    }
+  }
+  signal.throwIfAborted()
+}
+
+/** getPage has no AbortSignal API. Stop waiting promptly and clean up any late page. */
+export function comparisonPage(doc: PDFDocumentProxy | null, number: number, signal: AbortSignal): Promise<PdfPage | null> {
+  signal.throwIfAborted()
+  if (!doc || number > doc.numPages) return Promise.resolve(null)
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    Promise.resolve().then(() => { signal.throwIfAborted(); return doc.getPage(number) }).then((page) => {
+      signal.removeEventListener('abort', abort)
+      if (signal.aborted) page.cleanup()
+      else resolve(page)
+    }, (reason) => { signal.removeEventListener('abort', abort); reject(reason) })
+  })
+}
+
 export function pageGeometry(page: PdfPage): Geometry {
   // pdf.js applies CropBox, Rotate and UserUnit in the same way as its previews.
   const { width, height } = page.getViewport({ scale: 1 })
@@ -49,11 +99,23 @@ export function pairSize(original: Geometry | null, revised: Geometry | null, dp
 export async function renderComparisonPage(page: PdfPage, canvas: HTMLCanvasElement, size: ReturnType<typeof pairSize>, signal: AbortSignal) {
   signal.throwIfAborted()
   canvas.width = size.width; canvas.height = size.height
-  const task = page.render({ canvas, viewport: page.getViewport({ scale: size.scale }), background: '#ffffff' })
-  const cancel = () => task.cancel()
-  signal.addEventListener('abort', cancel, { once: true })
-  try { await task.promise; signal.throwIfAborted() }
-  finally { signal.removeEventListener('abort', cancel) }
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Could not render the page preview.')
+  const viewport = page.getViewport({ scale: size.scale })
+  // PDF.js relies on canvas edges for page clipping. Our canvas may be larger
+  // than this page, so explicitly clip its visible box and keep the padding white.
+  context.fillStyle = '#ffffff'; context.fillRect(0, 0, size.width, size.height)
+  context.save(); context.beginPath(); context.rect(0, 0, viewport.width, viewport.height); context.clip()
+  let cancel: (() => void) | undefined
+  try {
+    const task = page.render({ canvas, viewport, background: '#ffffff' })
+    cancel = () => task.cancel()
+    signal.addEventListener('abort', cancel, { once: true })
+    await task.promise; signal.throwIfAborted()
+  } finally {
+    if (cancel) signal.removeEventListener('abort', cancel)
+    context.restore()
+  }
 }
 
 /** Threshold RGB differences, then group adjacent occupied tiles into visible regions. */
@@ -130,16 +192,35 @@ export function textChanges(original: string, revised: string): { changes: TextC
   return changes.length > 200 ? fallback() : { changes, coarse: false }
 }
 
-async function extract(page: PdfPage | null, number: number, signal: AbortSignal): Promise<{ text: string; warning?: string }> {
+export async function readComparisonText(page: PdfPage | null, number: number, signal: AbortSignal): Promise<{ text: string; warning?: string }> {
+  signal.throwIfAborted()
   if (!page) return { text: '' }
+  let reader: ReadableStreamDefaultReader<TextContent> | undefined
+  let finished = false, stopped = false
+  const stop = () => {
+    if (stopped || !reader) return
+    stopped = true
+    // Cancel closes pending reads immediately; do not wait for the worker's acknowledgement.
+    void reader.cancel(new Error('Text comparison stopped.')).catch(() => {})
+  }
   try {
-    const content = await page.getTextContent({ includeMarkedContent: false })
-    signal.throwIfAborted()
-    if (content.items.length > COMPARE_LIMITS.pageItems) return { text: '', warning: 'Too many text items; visual comparison only.' }
+    if (page.isPureXfa) return { text: '', warning: 'XFA text extraction is unsupported; visual comparison only.' }
+    reader = page.streamTextContent({ includeMarkedContent: false }).getReader()
+    signal.addEventListener('abort', stop, { once: true })
+    const content: TextContent = { items: [], styles: {}, lang: null }
     let characters = 0
-    for (const item of content.items) {
-      if ('str' in item) characters += item.str.length
-      if (characters > COMPARE_LIMITS.pageCharacters) return { text: '', warning: 'Too much page text; visual comparison only.' }
+    while (true) {
+      signal.throwIfAborted()
+      const { value, done } = await reader.read()
+      signal.throwIfAborted()
+      if (done) { finished = true; break }
+      if (content.items.length + value.items.length > COMPARE_LIMITS.pageItems) return { text: '', warning: 'Too many text items; visual comparison only.' }
+      for (const item of value.items) {
+        if ('str' in item) characters += item.str.length
+        if (characters > COMPARE_LIMITS.pageCharacters) return { text: '', warning: 'Too much page text; visual comparison only.' }
+      }
+      // pageText needs positioned items only, not accumulated font/style dictionaries.
+      content.items.push(...value.items)
     }
     const text = pageText(content, number).text
     if (text.length > COMPARE_LIMITS.pageCharacters) return { text: '', warning: 'Too much page text; visual comparison only.' }
@@ -147,6 +228,10 @@ async function extract(page: PdfPage | null, number: number, signal: AbortSignal
   } catch {
     signal.throwIfAborted()
     return { text: '', warning: 'Text extraction failed; visual comparison only.' }
+  } finally {
+    signal.removeEventListener('abort', stop)
+    if (!finished) stop()
+    reader?.releaseLock()
   }
 }
 
@@ -165,9 +250,9 @@ export async function comparePdfs(original: PDFDocumentProxy, revised: PDFDocume
     let a: PdfPage | null = null, b: PdfPage | null = null
     let ca: HTMLCanvasElement | null = null, cb: HTMLCanvasElement | null = null
     try {
-      a = number <= original.numPages ? await original.getPage(number) : null
+      a = await comparisonPage(original, number, signal)
       signal.throwIfAborted()
-      b = number <= revised.numPages ? await revised.getPage(number) : null
+      b = await comparisonPage(revised, number, signal)
       signal.throwIfAborted()
       const ga = a && pageGeometry(a), gb = b && pageGeometry(b), size = pairSize(ga, gb, settings.dpi)
       pixels += size.width * size.height
@@ -178,6 +263,7 @@ export async function comparePdfs(original: PDFDocumentProxy, revised: PDFDocume
         await renderComparisonPage(a, ca, size, signal)
         await renderComparisonPage(b, cb, size, signal)
         onProgress?.({ completed: number - 1, total, phase: `Comparing page pair ${number}` })
+        signal.throwIfAborted()
         const ac = ca.getContext('2d'), bc = cb.getContext('2d')
         if (!ac || !bc) throw new Error('Could not read the page preview.')
         visual = await visualChanges(ac.getImageData(0, 0, size.width, size.height).data, bc.getImageData(0, 0, size.width, size.height).data, size.width, size.height, settings.tolerance, signal)
@@ -185,7 +271,7 @@ export async function comparePdfs(original: PDFDocumentProxy, revised: PDFDocume
       // Drop the rasters before text extraction and before loading the next page pair.
       if (ca) { ca.width = 0; ca.height = 0 }
       if (cb) { cb.width = 0; cb.height = 0 }
-      const ta = await extract(a, number, signal), tb = await extract(b, number, signal)
+      const ta = await readComparisonText(a, number, signal), tb = await readComparisonText(b, number, signal)
       signal.throwIfAborted()
       characters += ta.text.length + tb.text.length
       if (characters > COMPARE_LIMITS.characters) throw new Error('Comparison text budget exceeded. Split the PDFs into smaller documents.')
@@ -206,6 +292,9 @@ export async function comparePdfs(original: PDFDocumentProxy, revised: PDFDocume
       if (cb) { cb.width = 0; cb.height = 0 }
       a?.cleanup(); b?.cleanup()
     }
+    // Page cleanup alone retains document-wide decoded images/fonts and worker caches.
+    // The shared scheduler keeps previews out of the way during document cleanup.
+    await cleanupComparisonDocuments(original, revised, signal)
     await yieldToBrowser()
   }
   signal.throwIfAborted()

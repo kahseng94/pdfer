@@ -1,46 +1,66 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFDocumentProxy } from '../lib/pdf'
-import { pageGeometry, pairSize, renderComparisonPage, type ComparisonPage, type Difference, type Geometry } from '../lib/pdfCompare'
+import { cleanupComparisonDocuments, comparisonPage, createComparisonScheduler, pageGeometry, pairSize, renderComparisonPage, type ComparisonPage, type ComparisonScheduler, type Difference, type Geometry } from '../lib/pdfCompare'
 import { ErrorMessage } from './ui'
 
 /** Re-render only the visible pair; no document-wide image cache. */
-export function ComparePreview({ original, revised, page, result, selected, dpi }: {
+export function ComparePreview({ original, revised, page, result, selected, dpi, schedule: sharedSchedule }: {
   original: PDFDocumentProxy | null; revised: PDFDocumentProxy | null; page: number
-  result?: ComparisonPage; selected?: Difference; dpi: number
+  result?: ComparisonPage; selected?: Difference; dpi: number; schedule?: ComparisonScheduler
 }) {
   const leftHost = useRef<HTMLDivElement>(null), rightHost = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<{ size: ReturnType<typeof pairSize>; geometry: (Geometry | null)[] } | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [ownSchedule] = useState(createComparisonScheduler)
+  const schedule = sharedSchedule ?? ownSchedule
+  const request = useMemo(() => ({ original, revised, page, dpi }), [original, revised, page, dpi])
+  type View = { size: ReturnType<typeof pairSize>; geometry: (Geometry | null)[] }
+  const [display, setDisplay] = useState<{ request: typeof request; view?: View; error?: string } | null>(null)
+  const view = display?.request === request ? display.view : undefined
+  const error = display?.request === request ? display.error : undefined
   useEffect(() => {
     const controller = new AbortController(), { signal } = controller
     const canvases = [document.createElement('canvas'), document.createElement('canvas')]
     let a: Awaited<ReturnType<PDFDocumentProxy['getPage']>> | null = null
     let b: Awaited<ReturnType<PDFDocumentProxy['getPage']>> | null = null
+    let settled = false
+    const release = () => { for (const c of canvases) { c.remove(); c.width = 0; c.height = 0 } }
     async function render() {
       try {
-        a = original && page <= original.numPages ? await original.getPage(page) : null
-        signal.throwIfAborted()
-        b = revised && page <= revised.numPages ? await revised.getPage(page) : null
-        signal.throwIfAborted()
-        const geometry = [a && pageGeometry(a), b && pageGeometry(b)]
-        const size = pairSize(geometry[0], geometry[1], dpi)
-        if (a) await renderComparisonPage(a, canvases[0], size, signal)
-        if (b) await renderComparisonPage(b, canvases[1], size, signal)
-        signal.throwIfAborted()
-        for (const [index, host] of [leftHost, rightHost].entries()) {
-          canvases[index].style.width = '100%'
-          canvases[index].style.display = 'block'
-          canvases[index].setAttribute('role', 'img')
-          canvases[index].setAttribute('aria-label', `${index === 0 ? 'Original' : 'Revised'} PDF preview, page ${page}`)
-          host.current?.replaceChildren(canvases[index])
-        }
-        setView({ size, geometry })
-      } catch (reason) { if (!signal.aborted) setError(`Could not preview page ${page}: ${(reason as Error).message}`) }
-      finally { a?.cleanup(); b?.cleanup(); if (signal.aborted) for (const c of canvases) { c.width = 0; c.height = 0 } }
+        await schedule(signal, async () => {
+          let published = false
+          try {
+            a = await comparisonPage(original, page, signal)
+            b = await comparisonPage(revised, page, signal)
+            signal.throwIfAborted()
+            const geometry = [a && pageGeometry(a), b && pageGeometry(b)]
+            const size = pairSize(geometry[0], geometry[1], dpi)
+            if (a) await renderComparisonPage(a, canvases[0], size, signal)
+            if (b) await renderComparisonPage(b, canvases[1], size, signal)
+            signal.throwIfAborted()
+            a?.cleanup(); b?.cleanup()
+            await cleanupComparisonDocuments(original, revised, signal)
+            for (const [index, host] of [leftHost, rightHost].entries()) {
+              canvases[index].style.width = '100%'
+              canvases[index].style.display = 'block'
+              canvases[index].setAttribute('role', 'img')
+              canvases[index].setAttribute('aria-label', `${index === 0 ? 'Original' : 'Revised'} PDF preview, page ${page}`)
+              host.current?.replaceChildren(canvases[index])
+            }
+            setDisplay({ request, view: { size, geometry } }); published = true
+          } finally {
+            a?.cleanup(); b?.cleanup()
+            if (!published) release()
+            settled = true
+          }
+        })
+      } catch (reason) {
+        settled = true; release()
+        if (!signal.aborted) setDisplay({ request, error: `Could not preview page ${page}: ${(reason as Error).message}` })
+      }
     }
     void render()
-    return () => { controller.abort(); for (const c of canvases) { c.remove(); c.width = 0; c.height = 0 } }
-  }, [original, revised, page, dpi, leftHost, rightHost])
+    // Never resize a canvas while PDF.js still owns its graphics state.
+    return () => { controller.abort(); for (const c of canvases) c.remove(); if (settled) release() }
+  }, [request, original, revised, page, dpi, schedule])
 
   return <div className="space-y-3">
     {!view && !error && <p role="status" className="text-sm text-zinc-500">Rendering side-by-side previews…</p>}
