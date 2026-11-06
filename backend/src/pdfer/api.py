@@ -130,16 +130,16 @@ def redact(pages: Annotated[list[UploadFile], File()], sizes: Annotated[str, For
 
 
 @app.get("/api/ocr/status")
-def ocr_status() -> Response:
-    return JSONResponse(ocr.status(), headers={"Cache-Control": "no-store"})
+def ocr_status(engine: Literal["tesseract", "paddleocr"] = "tesseract") -> Response:
+    return JSONResponse(ocr.status(engine), headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/ocr/page")
-async def ocr_page(request: Request, image: UploadFile, languages: Annotated[str, Form()], dpi: Annotated[int, Form()] = 300, rotate: Annotated[bool, Form()] = False) -> Response:
+async def ocr_page(request: Request, image: UploadFile, languages: Annotated[str, Form()], dpi: Annotated[int, Form()] = 300, rotate: Annotated[bool, Form()] = False, engine: Annotated[Literal["tesseract", "paddleocr"], Form()] = "tesseract") -> Response:
     data = await image.read(ocr.MAX_IMAGE_BYTES + 1)
     if len(data) > ocr.MAX_IMAGE_BYTES:
         raise core.PdfToolError("This page image is too large. Choose 150 DPI or split the PDF first.")
-    output, rotation = await ocr.recognize(data, languages, dpi, request.is_disconnected, rotate=rotate)
+    output, rotation = await ocr.recognize(data, languages, dpi, request.is_disconnected, engine, rotate=rotate)
     response = _download(output, "text.pdf", "application/pdf")
     response.headers["X-OCR-Rotation"] = str(rotation)
     return response

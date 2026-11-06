@@ -1,4 +1,4 @@
-"""Local Tesseract recognition and invisible text layers over the original PDF."""
+"""Local OCR engines and invisible text layers over the original PDF."""
 
 import asyncio
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 import pikepdf
 from PIL import Image
 
-from pdfer import core
+from pdfer import core, ocr_text, paddle_ocr
 
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
@@ -34,7 +34,12 @@ def _engine() -> str | None:
     return shutil.which(os.environ.get("PDFER_TESSERACT", "tesseract"))
 
 
-def status() -> dict:
+def status(engine: str = "tesseract") -> dict:
+    if engine == "paddleocr":
+        available = paddle_ocr.status()
+        return {**available, "can_rotate": bool(available["available"] and status()["can_rotate"])}
+    if engine != "tesseract":
+        raise core.PdfToolError("Choose Tesseract or PaddleOCR PP-OCRv6.")
     executable = _engine()
     if not executable:
         return {"available": False, "languages": [], "can_rotate": False, "message": _INSTALL}
@@ -45,7 +50,8 @@ def status() -> dict:
     installed = {line.strip() for line in result.stdout.splitlines() if _LANGUAGE.fullmatch(line.strip())}
     languages = sorted(installed - {"osd", "equ"})
     if result.returncode or not languages:
-        return {"available": False, "languages": [], "can_rotate": False, "message": "No OCR languages are available. Install a Tesseract language pack and check again."}
+        return {"available": False, "languages": [], "can_rotate": result.returncode == 0 and "osd" in installed,
+                "message": "No OCR languages are available. Install a Tesseract language pack and check again."}
     return {"available": True, "languages": languages, "can_rotate": "osd" in installed, "message": None}
 
 
@@ -67,7 +73,7 @@ def _write_image(data: bytes, path: Path) -> None:
         raise core.PdfToolError("The page image could not be read.") from None
 
 
-async def _run(arguments: list[str], disconnected: Callable[[], Awaitable[bool]], *, check: bool = True) -> int:
+async def _run(arguments: list[str], disconnected: Callable[[], Awaitable[bool]], *, check: bool = True, engine: str = "Tesseract") -> int:
     """Reap the native process on disconnect, cancellation, timeout, and failure."""
     if await disconnected():
         raise asyncio.CancelledError
@@ -77,7 +83,7 @@ async def _run(arguments: list[str], disconnected: Callable[[], Awaitable[bool]]
             env={**os.environ, "OMP_THREAD_LIMIT": "2"},
         )
     except OSError:
-        raise core.PdfToolError("Tesseract could not start. Check its installation and try again.") from None
+        raise core.PdfToolError(f"{engine} could not start. Check its installation and try again.") from None
     wait = asyncio.create_task(process.wait())
     try:
         async with asyncio.timeout(PAGE_TIMEOUT):
@@ -86,7 +92,7 @@ async def _run(arguments: list[str], disconnected: Callable[[], Awaitable[bool]]
                 if await disconnected():
                     raise asyncio.CancelledError
         if wait.result() and check:
-            raise core.PdfToolError("Tesseract could not recognize this page. Check the language packs or try 150 DPI.")
+            raise core.PdfToolError(f"{engine} could not recognize this page. Check its setup or try 150 DPI.")
         return wait.result()
     except TimeoutError:
         raise core.PdfToolError("OCR timed out on this page. Try 150 DPI or a smaller page range.") from None
@@ -122,19 +128,25 @@ async def _orientation(path: Path, executable: str, dpi: int, disconnected: Call
     return int(rotation[1])
 
 
-async def recognize(data: bytes, languages: str, dpi: int, disconnected: Callable[[], Awaitable[bool]], *, rotate: bool = False) -> tuple[bytes, int]:
+async def recognize(data: bytes, languages: str, dpi: int, disconnected: Callable[[], Awaitable[bool]], engine: str = "tesseract", *, rotate: bool = False) -> tuple[bytes, int]:
     if dpi not in (150, 300):
         raise core.PdfToolError("Choose 150 or 300 DPI for OCR.")
+    if engine not in ("tesseract", "paddleocr"):
+        raise core.PdfToolError("Choose Tesseract or PaddleOCR PP-OCRv6.")
+    if engine == "paddleocr" and languages != "auto":
+        raise core.PdfToolError("PP-OCRv6 uses its unified multilingual model. Choose automatic language recognition.")
     requested = languages.split("+")
     if not 1 <= len(requested) <= 8 or any(not _LANGUAGE.fullmatch(lang) for lang in requested):
         raise core.PdfToolError("Choose between one and eight installed OCR languages.")
-    installed = await asyncio.to_thread(status)
+    installed = await asyncio.to_thread(paddle_ocr.status if engine == "paddleocr" else status)
     if not installed["available"]:
         raise core.PdfToolError(installed["message"])
     if any(lang not in installed["languages"] for lang in requested):
         raise core.PdfToolError("An OCR language is not installed. Check the available languages and try again.")
-    if rotate and not installed.get("can_rotate"):
-        raise core.PdfToolError("Automatic rotation needs Tesseract's osd language pack. Install it and check again.")
+    if rotate:
+        orientation = await asyncio.to_thread(status) if engine == "paddleocr" else installed
+        if not orientation.get("can_rotate"):
+            raise core.PdfToolError("Automatic rotation needs Tesseract's osd language pack. Install it and check again.")
     while not _SLOTS.acquire(blocking=False):
         if await disconnected():
             raise asyncio.CancelledError
@@ -143,8 +155,8 @@ async def recognize(data: bytes, languages: str, dpi: int, disconnected: Callabl
         with tempfile.TemporaryDirectory(prefix="pdfer-ocr-") as folder:
             path = Path(folder)
             _write_image(data, path / "page.png")
-            executable = _engine()
-            if not executable:
+            executable = _engine() if rotate or engine == "tesseract" else None
+            if (rotate or engine == "tesseract") and not executable:
                 raise core.PdfToolError(_INSTALL)
             rotation = await _orientation(path, executable, dpi, disconnected) if rotate else 0
             if rotation:
@@ -154,6 +166,21 @@ async def recognize(data: bytes, languages: str, dpi: int, disconnected: Callabl
                     upright = image.transpose({90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_90}[rotation])
                 upright.save(path / "page.png", "PNG")
                 upright.close()
+            if engine == "paddleocr":
+                await _run([*paddle_ocr.command(), "--image", str(path / "page.png"), "--output", str(path / "words.json")],
+                           disconnected, engine="PaddleOCR PP-OCRv6")
+                words = path / "words.json"
+                if not words.is_file() or words.stat().st_size > MAX_LAYER_BYTES:
+                    raise core.PdfToolError("PaddleOCR did not produce a usable text layer. Try a smaller page.")
+                try:
+                    result = json.loads(words.read_text(encoding="utf-8"))
+                except (ValueError, UnicodeError):
+                    raise core.PdfToolError("PaddleOCR returned unreadable recognition results.") from None
+                with Image.open(path / "page.png") as image:
+                    output = ocr_text.build(result, *image.size, dpi)
+                if len(output) > MAX_LAYER_BYTES:
+                    raise core.PdfToolError("The OCR text layer is too large. Try a smaller page.")
+                return output, rotation
             await _run([executable, str(path / "page.png"), str(path / "text"),
                         "-l", "+".join(dict.fromkeys(requested)), "--dpi", str(dpi),
                         "-c", "textonly_pdf=1", "pdf"], disconnected)

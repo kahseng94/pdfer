@@ -7,6 +7,7 @@
     "dev:api": "uv --directory backend run uvicorn pdfer.api:app --reload --host 127.0.0.1 --port 8000",
     "dev:web": "pnpm --filter pdfer-frontend dev",
     "start": "pnpm --filter pdfer-frontend build && uv --directory backend run pdfer",
+    "ocr:paddle:setup": "uv run --project backend/ocr-runtime python backend/ocr-runtime/setup_models.py",
     "test": "uv --directory backend run pytest -q && pnpm --filter pdfer-frontend test"
   },
   "devDependencies": {

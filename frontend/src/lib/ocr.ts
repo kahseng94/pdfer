@@ -1,4 +1,4 @@
-import { assembleOcr, recognizePage } from './api'
+import { assembleOcr, recognizePage, type OcrEngine } from './api'
 import type { PDFDocumentProxy } from './pdf'
 import { pagesIn, parseSpec } from './ranges'
 
@@ -17,10 +17,11 @@ export function ocrPages(spec: string, total: number): number[] {
 
 /** Render only text-free selected pages; add invisible text to the original PDF. */
 export async function recognizePdf(doc: PDFDocumentProxy, source: File, spec: string, languages: readonly string[], dpi: number,
-  signal: AbortSignal, onProgress: (value: OcrProgress) => void, rotate = false): Promise<File> {
+  signal: AbortSignal, onProgress: (value: OcrProgress) => void, rotate = false, engine: OcrEngine = 'tesseract'): Promise<File> {
   const selected = ocrPages(spec, doc.numPages)
   if (source.size > 128 * 1024 * 1024) throw new Error('Choose a PDF under 128 MB, or split it first.')
   if (!languages.length || languages.length > 8) throw new Error('Choose between one and eight OCR languages.')
+  if (engine === 'paddleocr' && (languages.length !== 1 || languages[0] !== 'auto')) throw new Error('PaddleOCR uses automatic multilingual recognition.')
   if (!(OCR_DPI as readonly number[]).includes(dpi)) throw new Error('Choose 150 or 300 DPI.')
   const layers: File[] = []
   const pages: number[] = []
@@ -56,7 +57,7 @@ export async function recognizePdf(doc: PDFDocumentProxy, source: File, spec: st
       // Free the full-resolution raster before waiting on the native OCR engine.
       canvas.width = 0; canvas.height = 0
       progress('recognize')
-      const { file: layer, rotation } = await recognizePage(blob, languages, dpi, signal, rotate)
+      const { file: layer, rotation } = await recognizePage(blob, languages, dpi, signal, rotate, engine)
       signal.throwIfAborted()
       bytes += layer.size
       if (layer.size > 8 * 1024 * 1024 || bytes > 64 * 1024 * 1024) throw new Error('The OCR text is too large. Split the document first.')

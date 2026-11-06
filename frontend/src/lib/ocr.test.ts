@@ -40,7 +40,7 @@ it('recognizes only text-free pages, preserves the full source, and releases ras
   const progress = vi.fn()
   const output = await recognizePdf(doc, source, '', ['eng', 'fra'], 300, signal, progress)
   expect(recognize).toHaveBeenCalledTimes(2)
-  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal, false])
+  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal, false, 'tesseract'])
   expect(pages[1].render).not.toHaveBeenCalled()
   expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal, [0, 0])
   expect(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true)
@@ -66,6 +66,16 @@ it('keeps rotation corrections aligned with recognized pages and reports their c
   expect(recognize.mock.calls.every((call) => call[4] === true)).toBe(true)
   expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal, [90, 0])
   expect(progress).toHaveBeenLastCalledWith({ completed: 3, total: 3, page: 3, skipped: 1, recognized: 2, rotated: 1, phase: 'assemble' })
+})
+
+it('passes the selected Paddle engine and rotation while preserving page ranges', async () => {
+  const { doc } = fixture(['', '', ''])
+  recognize.mockResolvedValue({ file: new File(['text'], 'text.pdf'), rotation: 180 })
+  const signal = new AbortController().signal
+  await recognizePdf(doc, source, '2', ['auto'], 150, signal, vi.fn(), true, 'paddleocr')
+  expect(recognize.mock.calls[0].slice(1)).toEqual([['auto'], 150, signal, true, 'paddleocr'])
+  expect(assemble).toHaveBeenCalledWith(source, [expect.any(File)], [2], signal, [180])
+  await expect(recognizePdf(doc, source, '', ['eng'], 150, signal, vi.fn(), false, 'paddleocr')).rejects.toThrow('automatic multilingual')
 })
 
 it('offers no redundant output when all selected pages already contain text', async () => {

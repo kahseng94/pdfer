@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
 from conftest import make_image, make_pdf
-from pdfer import core, ocr
+from pdfer import core, ocr, paddle_ocr
 from pdfer.api import app
 
 
@@ -272,10 +272,13 @@ def test_ocr_preserves_pixels_and_password_with_crop_scale_and_rotation(rotation
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
-def test_real_ocr_rotation_keeps_scan_pixels_and_adds_aligned_searchable_text(rotation):
+@pytest.mark.parametrize("engine", ["tesseract", "paddleocr"])
+def test_real_ocr_rotation_keeps_scan_pixels_and_adds_aligned_searchable_text(rotation, engine):
     installed = ocr.status()
     if not installed['available'] or 'eng' not in installed['languages'] or not installed['can_rotate']:
         pytest.skip('Install local Tesseract English and osd language packs')
+    if engine == 'paddleocr' and not paddle_ocr.status()['available']:
+        pytest.skip('Run pnpm ocr:paddle:setup for the optional native integration test')
     image = Image.new('RGB', (1800, 2400), 'white')
     font = ImageFont.truetype(str(Path(core.__file__).with_name('fonts') / 'DejaVuSans.ttf'), 46)
     draw = ImageDraw.Draw(image)
@@ -309,7 +312,7 @@ def test_real_ocr_rotation_keeps_scan_pixels_and_adds_aligned_searchable_text(ro
             page.close()
     client = TestClient(app)
     response = client.post('/api/ocr/page', files={'image': ('scan.png', raster.getvalue(), 'image/png')},
-                           data={'languages': 'eng', 'dpi': 300, 'rotate': 'true'})
+                           data={'languages': 'auto' if engine == 'paddleocr' else 'eng', 'engine': engine, 'dpi': 300, 'rotate': 'true'})
     assert response.status_code == 200, response.text
     correction = int(response.headers['x-ocr-rotation'])
     assert correction == (360 - rotation) % 360

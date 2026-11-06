@@ -20,9 +20,10 @@ it('sends only the page image and OCR options to the recognition endpoint', asyn
   const [path, request] = fetch.mock.calls[0]
   expect(path).toBe('/api/ocr/page')
   expect(request.signal).toBe(signal)
-  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi', 'rotate'])
+  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi', 'rotate', 'engine'])
   expect(request.body.get('languages')).toBe('eng+fra')
   expect(request.body.get('rotate')).toBe('false')
+  expect(request.body.get('engine')).toBe('tesseract')
 })
 
 it('retains passwords in the assembled result and forwards cancellation', async () => {
@@ -57,4 +58,18 @@ it('carries orientation corrections from recognition into the assembled document
 it.each(['45', '-90', '360', 'NaN'])('rejects invalid rotation headers (%s)', async (rotation) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('text layer', { headers: { 'X-OCR-Rotation': rotation } })))
   await expect(recognizePage(new Blob(['image']), ['eng'], 300, new AbortController().signal, true)).rejects.toThrow('invalid page rotation')
+})
+
+it('requests Paddle availability and sends its engine together with rotation', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json({ available: true, languages: ['auto'], can_rotate: true, message: null }))
+    .mockResolvedValueOnce(new Response('layer', { headers: { 'content-type': 'application/pdf', 'X-OCR-Rotation': '90' } }))
+  vi.stubGlobal('fetch', fetch)
+  const signal = new AbortController().signal
+  expect((await readOcrStatus(signal, 'paddleocr')).can_rotate).toBe(true)
+  expect(fetch).toHaveBeenNthCalledWith(1, '/api/ocr/status?engine=paddleocr', { signal, cache: 'no-store' })
+  const output = await recognizePage(new Blob(['image']), ['auto'], 150, signal, true, 'paddleocr')
+  expect(output.rotation).toBe(90)
+  expect(fetch.mock.calls[1][1].body.get('engine')).toBe('paddleocr')
+  expect(fetch.mock.calls[1][1].body.get('languages')).toBe('auto')
+  expect(fetch.mock.calls[1][1].body.get('rotate')).toBe('true')
 })

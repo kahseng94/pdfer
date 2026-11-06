@@ -79,23 +79,25 @@ export async function rebuildRedactedPdf(source: File, pages: File[], sizes: Pdf
   return file
 }
 
+export type OcrEngine = 'tesseract' | 'paddleocr'
 export type OcrStatus = { available: boolean; languages: string[]; can_rotate: boolean; message: string | null }
 export type OcrPage = { file: File; rotation: number }
 
-export async function readOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
+export async function readOcrStatus(signal?: AbortSignal, engine: OcrEngine = 'tesseract'): Promise<OcrStatus> {
   let response: Response
-  try { response = await fetch('/api/ocr/status', { signal, cache: 'no-store' }) }
+  try { response = await fetch(engine === 'tesseract' ? '/api/ocr/status' : '/api/ocr/status?engine=paddleocr', { signal, cache: 'no-store' }) }
   catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
   if (!response.ok) throw new Error(`Could not check the OCR engine (HTTP ${response.status}).`)
   return response.json() as Promise<OcrStatus>
 }
 
-export async function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal, rotate = false): Promise<OcrPage> {
+export async function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal, rotate = false, engine: OcrEngine = 'tesseract'): Promise<OcrPage> {
   const body = new FormData()
   body.append('image', image, 'page.png')
   body.append('languages', languages.join('+'))
   body.append('dpi', String(dpi))
   body.append('rotate', String(rotate))
+  body.append('engine', engine)
   const { file, headers } = await upload('/api/ocr/page', body, 'text.pdf', signal)
   const rotation = Number(headers.get('X-OCR-Rotation') ?? '0')
   if (![0, 90, 180, 270].includes(rotation) || (!rotate && rotation !== 0)) throw new Error('OCR returned an invalid page rotation.')
