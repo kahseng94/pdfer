@@ -12,6 +12,9 @@ tessdata = Path(os.environ["PDFER_BUILD_TESSDATA"])
 datas = collect_data_files("pdfer", includes=["fonts/*"])
 for name in ("eng.traineddata", "osd.traineddata"):
     datas.append((str(tessdata / name), "tessdata"))
+if (tessdata / "pdf.ttf").is_file():
+    # Tesseract 4 loads this glyphless font at runtime when producing PDF text.
+    datas.append((str(tessdata / "pdf.ttf"), "tessdata"))
 for name in ("configs", "tessconfigs"):
     if (tessdata / name).is_dir():
         datas.append((str(tessdata / name), "tessdata/" + name))

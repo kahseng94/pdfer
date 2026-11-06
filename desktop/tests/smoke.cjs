@@ -154,9 +154,10 @@ async function run(dataDir, phase) {
       const image=await new Promise(r=>canvas.toBlob(r,'image/png'));
       const body=new FormData(); body.append('image',image,'scan.png'); body.append('languages','eng'); body.append('dpi','150');
       const response=await fetch('/api/ocr/page',{method:'POST',body});
-      return {status:response.status, pdf:(await response.text()).startsWith('%PDF-')};
+      const output=await response.text();
+      return {status:response.status, pdf:output.startsWith('%PDF-'), error:response.ok ? undefined : output};
     })()`)
-    assert.equal(recognized.status, 200); assert.equal(recognized.pdf, true)
+    assert.equal(recognized.status, 200, JSON.stringify(recognized)); assert.equal(recognized.pdf, true)
     if (process.env.PDFER_SMOKE_PADDLE === '1') {
       const paddle = await evaluate(`(async () => {
         const canvas=document.createElement('canvas'); canvas.width=1000; canvas.height=220;
