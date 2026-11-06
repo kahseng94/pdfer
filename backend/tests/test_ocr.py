@@ -139,7 +139,10 @@ def test_native_process_is_stopped_and_reaped(kind, monkeypatch):
         async def disconnected(): return bool(created) and kind == "disconnect"
         task = asyncio.create_task(ocr._run([sys.executable, "-c", "import time; time.sleep(30)"], disconnected))
         if kind == "cancel":
-            while not created: await asyncio.sleep(0.01)
+            async with asyncio.timeout(5):
+                while not created:
+                    if task.done(): await task  # Surface startup failures instead of waiting forever.
+                    await asyncio.sleep(0.01)
             task.cancel()
         with pytest.raises(core.PdfToolError if kind == "timeout" else asyncio.CancelledError):
             await task

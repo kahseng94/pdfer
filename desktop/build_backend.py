@@ -1,6 +1,7 @@
 """Prepare self-contained native resources before electron-builder runs."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,19 +11,32 @@ ROOT = Path(__file__).resolve().parent.parent
 RESOURCES = ROOT / "desktop/resources"
 
 
+def find_tessdata(executable: Path, report: str, *, env=None, prefixes=None) -> Path:
+    env = os.environ if env is None else env
+    configured = env.get("PDFER_BUILD_TESSDATA") or env.get("TESSDATA_PREFIX")
+    if configured:
+        candidates = [Path(configured)]
+    else:
+        # Recent Tesseract prints its data directory; older Linux builds only
+        # print the language count. Also support installation-relative layouts.
+        candidates = [Path(value) for value in re.findall(r'"([^"\n]+)"', report)]
+        candidates.append(executable.resolve().parent / "tessdata")
+        roots = prefixes if prefixes is not None else [executable.resolve().parent.parent, executable.parent.parent, Path("/usr")]
+        for prefix in roots:
+            candidates.append(prefix / "share/tessdata")
+            candidates.extend(sorted((prefix / "share/tesseract-ocr").glob("*/tessdata")))
+    for candidate in candidates:
+        if all((candidate / name).is_file() for name in ("eng.traineddata", "osd.traineddata")):
+            return candidate.resolve()
+    raise SystemExit("English and orientation data are required. Set PDFER_BUILD_TESSDATA to the folder containing eng.traineddata and osd.traineddata.")
+
+
 def main():
     tesseract = Path(os.environ.get("PDFER_BUILD_TESSERACT") or shutil.which("tesseract") or "")
     if not tesseract.is_file():
         raise SystemExit("Install Tesseract on the build machine, or set PDFER_BUILD_TESSERACT.")
-    configured = os.environ.get("PDFER_BUILD_TESSDATA") or os.environ.get("TESSDATA_PREFIX")
-    if configured:
-        tessdata = Path(configured)
-    else:
-        # --list-langs prints the configured data directory on every supported OS.
-        first_line = subprocess.check_output([str(tesseract), "--list-langs"], text=True).splitlines()[0]
-        tessdata = Path(first_line.split('"')[1])
-    if any(not (tessdata / name).is_file() for name in ("eng.traineddata", "osd.traineddata")):
-        raise SystemExit(f"English and orientation data are required in {tessdata}.")
+    report = subprocess.check_output([str(tesseract), "--list-langs"], text=True)
+    tessdata = find_tessdata(tesseract, report)
     uv = shutil.which("uv")
     if not uv:
         raise SystemExit("uv is required on the build machine to bundle optional OCR setup.")
