@@ -54,7 +54,7 @@ jobs:
           'C:\Program Files\Tesseract-OCR' | Out-File -FilePath $env:GITHUB_PATH -Append
       - run: pnpm install --frozen-lockfile
       - name: Test Python engine
-        run: uv --directory backend run pytest -x ${{ runner.os == 'Windows' && '-vv' || '-q' }} --timeout=120 --timeout-method=thread -o faulthandler_timeout=90
+        run: node desktop/tests/python-ci.cjs
         timeout-minutes: 15
       - name: Test frontend
         run: pnpm --filter pdfer-frontend test
