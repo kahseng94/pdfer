@@ -2,6 +2,11 @@ name: Desktop installers
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Build release artifacts and create a draft after all checks pass
+        type: boolean
+        default: false
   push:
     tags: ['v*']
 
@@ -16,7 +21,7 @@ jobs:
         os: [macos-15, macos-15-intel, windows-2022, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     env:
-      PDFER_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+      PDFER_RELEASE: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.release) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,25 +53,39 @@ jobs:
       - run: pnpm test
       - run: pnpm --filter pdfer-frontend lint
       - name: Prepare Apple notarization key
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        if: runner.os == 'macOS'
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
         run: |
           python - <<'PY'
           import base64, os
           from pathlib import Path
+          encoded = os.environ.get('APPLE_API_KEY_BASE64', '')
+          if not encoded:
+              raise SystemExit(0)
           key = Path(os.environ['RUNNER_TEMP']) / 'notarization.p8'
-          key.write_bytes(base64.b64decode(os.environ['APPLE_API_KEY_BASE64'], validate=True))
+          key.write_bytes(base64.b64decode(encoded, validate=True))
           key.chmod(0o600)
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write(f'APPLE_API_KEY={key}\n')
           PY
-      - name: Build installers
+      - name: Build Mac installers and signed Sparkle feeds
+        if: runner.os == 'macOS'
         env:
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: pnpm desktop:build
+      - name: Build Windows installers (sign when a certificate is configured)
+        if: runner.os == 'Windows'
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: pnpm desktop:build
+      - name: Build Linux installers
+        if: runner.os == 'Linux'
         run: pnpm desktop:build
       - name: Test packaged app (macOS and Windows)
         if: runner.os != 'Linux'
@@ -74,6 +93,9 @@ jobs:
       - name: Test packaged app (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum pnpm desktop:smoke
+      - name: Verify Sparkle signatures, installation and relaunch
+        if: runner.os == 'macOS'
+        run: pnpm desktop:sparkle-test
       - name: Upload installers and update metadata
         uses: actions/upload-artifact@v4
         with:
@@ -86,12 +108,13 @@ jobs:
             release/*.AppImage
             release/*.blockmap
             release/latest*.yml
+            release/appcast-*.xml
       - name: Remove temporary notarization key
         if: always() && runner.os == 'macOS'
         run: rm -f "$RUNNER_TEMP/notarization.p8"
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release
     needs: build
     runs-on: ubuntu-22.04
     permissions:
@@ -107,4 +130,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" installers/* --verify-tag --draft --title "pdfer $GITHUB_REF_NAME" --generate-notes
+          tag="v$(node -p 'require("./package.json").version')"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"
+            test "$(git rev-list -n 1 "$tag")" = "$GITHUB_SHA"
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+          gh release create "$tag" installers/* --verify-tag --draft --title "pdfer $tag" --generate-notes

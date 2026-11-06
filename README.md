@@ -9,6 +9,7 @@ Run `pnpm desktop:dev` to open the Electron app, or `pnpm desktop:build` to
 create an installer for this computer. Desktop installers include Python,
 the PDF libraries, and English OCR. PaddleOCR has an optional in-app setup.
 Published releases support **Download update → Restart to update**.
+macOS uses Sparkle with a free update-signing key; Windows signing is optional.
 See [desktop setup and releases](desktop/README.md) for build prerequisites,
 signing, local data, and the GitHub release workflow.
 

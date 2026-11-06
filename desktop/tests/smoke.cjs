@@ -98,6 +98,21 @@ async function run(dataDir, phase) {
     assert.equal(ready.fonts, 200); assert.equal(ready.signatures, 200)
     assert.equal(ready.ocr.available, true, JSON.stringify(ready.ocr))
     assert.ok(ready.ocr.languages.includes('eng')); assert.equal(ready.ocr.can_rotate, true); assert.match(ready.text, /Desktop/)
+    if (process.env.PDFER_SMOKE_EXPECT_UNPUBLISHED === '1') {
+      const state = await evaluate(`(async () => {
+        await window.pdferDesktop.checkForUpdates();
+        const deadline=Date.now()+20000;
+        while(Date.now()<deadline){
+          const state=await window.pdferDesktop.getUpdateState();
+          if(state.status!=='checking') return state;
+          await new Promise(r=>setTimeout(r,100));
+        }
+        throw new Error('Update check timed out');
+      })()`)
+      assert.equal(state.status, 'idle', JSON.stringify(state))
+      assert.equal(state.message, 'No published stable release is available yet.')
+      console.log('Missing first release is shown as a normal status, not a connection error.')
+    }
     const merged = await evaluate(`(async () => {
       const bytes = Uint8Array.from(atob(${JSON.stringify(samplePdf().toString('base64'))}), c => c.charCodeAt(0));
       const file = new File([bytes], 'local-test.pdf', {type:'application/pdf'});
@@ -176,8 +191,10 @@ async function run(dataDir, phase) {
   }
 }
 
-(async () => {
+async function main() {
   const dataDir = process.env.PDFER_SMOKE_DATA_DIR || await fs.mkdtemp(path.join(os.tmpdir(), 'pdfer-installed-'))
   try { await run(dataDir, 'write'); await run(dataDir, 'read') }
   finally { if (!process.env.PDFER_SMOKE_DATA_DIR) await fs.rm(dataDir, { recursive: true, force: true }) }
-})().then(() => process.exit(0), (error) => { console.error(error); process.exit(1) })
+}
+module.exports = { connect }
+if (require.main === module) main().then(() => process.exit(0), (error) => { console.error(error); process.exit(1) })

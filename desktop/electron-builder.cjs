@@ -1,22 +1,23 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const { releaseSettings } = require('./release-config.cjs')
+const { distribution } = require('./sparkle/prepare.cjs')
 
-// GitHub Actions supplies this automatically. Local builds can set the same value.
-const repository = process.env.PDFER_RELEASE_REPOSITORY || process.env.GITHUB_REPOSITORY
-if (repository && !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('PDFER_RELEASE_REPOSITORY must be owner/repository.')
-const [owner, repo] = (repository || '').split('/')
-const release = process.env.PDFER_RELEASE === '1'
-if (release && !repository) throw new Error('A release repository is required.')
-if (release && ['darwin', 'win32'].includes(process.platform) && !process.env.CSC_LINK) throw new Error('Release builds require CSC_LINK and CSC_KEY_PASSWORD for code signing.')
-if (release && process.platform === 'darwin' && !(process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER)) {
-  throw new Error('macOS releases require Apple notarization API credentials.')
-}
-if (!fs.existsSync(path.join(__dirname, 'resources/pdfer-backend'))) throw new Error('Run pnpm desktop:backend first.')
+const settings = releaseSettings()
 
 module.exports = {
   appId: 'com.pdfer.desktop', productName: 'pdfer',
-  directories: { output: 'release', buildResources: 'desktop/assets' },
-  files: ['desktop/*.cjs', '!desktop/electron-builder.cjs', 'package.json'],
+  directories: { output: process.env.PDFER_OUTPUT_DIR || 'release', buildResources: 'desktop/assets' },
+  files: ['desktop/*.cjs', '!desktop/electron-builder.cjs', '!desktop/release-config.cjs', 'package.json'],
+  ...(process.env.PDFER_BUILD_VERSION ? { extraMetadata: { version: process.env.PDFER_BUILD_VERSION } } : {}),
+  beforePack: () => {
+    if (!fs.existsSync(path.join(__dirname, 'resources/pdfer-backend'))) throw new Error('Run pnpm desktop:backend first.')
+  },
+  afterPack: async ({ appOutDir, packager, electronPlatformName }) => {
+    if (electronPlatformName === 'darwin') {
+      await fs.promises.writeFile(path.join(packager.getResourcesDir(appOutDir), 'sparkle.json'), JSON.stringify({ enabled: settings.sparkleEnabled, feedURL: settings.feedURL }))
+    }
+  },
   extraResources: [
     { from: 'frontend/dist', to: 'frontend' },
     { from: 'desktop/resources/pdfer-backend', to: 'pdfer-backend' },
@@ -26,12 +27,23 @@ module.exports = {
   ],
   asar: true, npmRebuild: false,
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
-  forceCodeSigning: release && process.platform !== 'linux',
+  forceCodeSigning: settings.forceCodeSigning,
   generateUpdatesFilesForAllChannels: false,
-  publish: repository && (release || process.env.PDFER_RELEASE_REPOSITORY) ? [{ provider: 'github', owner, repo, channel: `latest-${process.arch}`, releaseType: 'draft' }] : null,
+  // macOS uses signed Sparkle feeds; NSIS/AppImage continue using electron-updater.
+  publish: process.platform === 'darwin' ? null : settings.publish,
   mac: { category: 'public.app-category.productivity', target: ['dmg', 'zip'],
-    identity: !release && !process.env.CSC_LINK ? '-' : undefined,
-    hardenedRuntime: release, notarize: release },
+    identity: settings.osSigning ? undefined : '-',
+    hardenedRuntime: settings.osSigning, notarize: settings.notarize,
+    extraFiles: [{ from: path.join(distribution, 'Sparkle.framework'), to: 'Frameworks/Sparkle.framework' }],
+    extraResources: [{ from: 'desktop/resources/native', to: 'native' }],
+    extendInfo: {
+      ...(settings.publicKey ? { SUPublicEDKey: settings.publicKey } : {}),
+      ...(settings.feedURL ? { SUFeedURL: settings.feedURL } : {}),
+      SUEnableAutomaticChecks: false, SUAutomaticallyUpdate: false, SUAllowsAutomaticUpdates: false,
+      SUEnableSystemProfiling: false, SUShowReleaseNotes: false,
+      SUVerifyUpdateBeforeExtraction: true, SURequireSignedFeed: true,
+      ...(!settings.release && settings.feedURL?.startsWith('http:') ? { NSAppTransportSecurity: { NSAllowsLocalNetworking: true } } : {}),
+    } },
   win: { target: ['nsis'] },
   nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true,
     deleteAppDataOnUninstall: false, createDesktopShortcut: true },

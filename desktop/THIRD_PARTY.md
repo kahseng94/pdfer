@@ -1,5 +1,10 @@
 # Desktop runtime components
 
+macOS builds include Sparkle (permissive license) and its license notices inside
+Sparkle.framework. The pinned version and archive checksum are in
+`desktop/sparkle/version.json`. Source: https://github.com/sparkle-project/Sparkle.
+The native bridge is compiled against Node-API headers (MIT).
+
 pdfer bundles Electron (MIT), electron-updater (MIT), CPython (PSF), and its
 Python PDF dependencies. Electron includes its LICENSE and LICENSES.chromium.html.
 Python package metadata and bundled DejaVu font licensing are retained with the

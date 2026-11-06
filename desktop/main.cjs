@@ -11,7 +11,8 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'pdfer', privileges: {
 } }])
 
 function configureDataDir(provided) {
-  app.setName('pdfer')
+  // The manifest supplies the stable name. Isolated test builds use their own
+  // manifest name so Sparkle relaunches into the same isolated profile.
   // Development and smoke tests must not change a user's installed-app projects.
   const dataDir = provided || process.env.PDFER_USER_DATA_DIR || (app.isPackaged ? app.getPath('userData') : path.join(app.getPath('appData'), 'pdfer-development'))
   fs.mkdirSync(dataDir, { recursive: true })
@@ -27,6 +28,7 @@ async function launch(options = {}) {
   const logFile = path.join(dataDir, 'desktop.log')
   fs.writeFileSync(logFile, '')
   const log = (text) => { if (logBytes < 1024 * 1024) { logBytes += Buffer.byteLength(text); fs.appendFileSync(logFile, text) } }
+  log(`pdfer ${app.getVersion()} started\n`)
   const resources = options.resources || (app.isPackaged ? process.resourcesPath : path.join(root, 'desktop/resources'))
   const bundled = app.isPackaged || options.useBundledBackend
   const ocr = new OcrSetup({ source: bundled ? path.join(resources, 'ocr-runtime') : path.join(root, 'backend/ocr-runtime'),
@@ -37,11 +39,12 @@ async function launch(options = {}) {
   let quitting = false
   let cleaned = false
   let backend
+  let updates
   function send(channel, value) { if (window && !window.isDestroyed()) window.webContents.send(channel, value) }
   const cleanup = async () => {
     if (cleaned) return
     cleaned = true
-    await Promise.allSettled([backend?.stop(), ocr.stop()])
+    await Promise.allSettled([backend?.stop(), ocr.stop(), !installRequested ? updates?.updater.dispose?.() : undefined])
   }
   try {
     backend = await startBackend({
@@ -57,8 +60,22 @@ async function launch(options = {}) {
     })
   } catch (error) { await cleanup(); throw error }
 
-  const { autoUpdater } = require('electron-updater')
-  const updates = new Updates(autoUpdater, { enabled: app.isPackaged && fs.existsSync(path.join(resources, 'app-update.yml')),
+  let autoUpdater, updatesEnabled = false
+  if (process.platform === 'darwin') {
+    const configFile = path.join(resources, 'sparkle.json')
+    const sparkleConfig = app.isPackaged && fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile, 'utf8')) : {}
+    updatesEnabled = sparkleConfig.enabled === true
+    if (updatesEnabled) {
+      const { SparkleUpdater } = require('./sparkle.cjs')
+      autoUpdater = new SparkleUpdater(require(path.join(resources, 'native/pdfer-sparkle.node')), { log, feedURL: sparkleConfig.feedURL })
+    } else {
+      autoUpdater = new (require('node:events').EventEmitter)()
+    }
+  } else {
+    autoUpdater = require('electron-updater').autoUpdater
+    updatesEnabled = app.isPackaged && fs.existsSync(path.join(resources, 'app-update.yml'))
+  }
+  updates = new Updates(autoUpdater, { enabled: updatesEnabled,
     version: app.getVersion(), notify: (value) => send('updates:changed', value) })
   let installationFailed = false
   const reportInstallFailure = () => {
@@ -139,6 +156,7 @@ async function launch(options = {}) {
   ]))
   await window.loadURL(APP_URL)
   if (options.show !== false) window.show()
+  log(`pdfer ${app.getVersion()} ready\n`)
   if (updates.state.status !== 'disabled') {
     const timer = setTimeout(() => { void updates.check() }, 10000)
     timer.unref()

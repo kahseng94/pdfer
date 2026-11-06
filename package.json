@@ -15,15 +15,20 @@
     "test": "uv --directory backend run pytest -q && pnpm --filter pdfer-frontend test && pnpm desktop:test",
     "desktop:dev": "pnpm --filter pdfer-frontend build && electron .",
     "desktop:backend": "uv run --project backend --group desktop python desktop/build_backend.py",
-    "desktop:build": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && electron-builder --config desktop/electron-builder.cjs --publish never",
-    "desktop:pack": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && electron-builder --config desktop/electron-builder.cjs --dir --publish never",
+    "desktop:build": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && pnpm desktop:sparkle && electron-builder --config desktop/electron-builder.cjs --publish never && pnpm desktop:appcast",
+    "desktop:pack": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && pnpm desktop:sparkle && electron-builder --config desktop/electron-builder.cjs --dir --publish never",
+    "desktop:sparkle": "node desktop/sparkle/prepare.cjs",
+    "desktop:keys": "node desktop/sparkle/keys.cjs",
+    "desktop:appcast": "node desktop/sparkle/publish.cjs",
     "desktop:test": "node --test desktop/tests/*.test.cjs",
-    "desktop:smoke": "node desktop/tests/smoke.cjs"
+    "desktop:smoke": "node desktop/tests/smoke.cjs",
+    "desktop:sparkle-test": "node desktop/tests/sparkle-integration.cjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.6",
     "electron": "45.2.3",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "node-api-headers": "1.9.0"
   },
   "packageManager": "pnpm@11.9.0",
   "dependencies": {
