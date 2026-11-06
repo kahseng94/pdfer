@@ -6,6 +6,7 @@ import type { StampSettings } from './stamps'
 import { effectiveImageLayout, type ImagePdfLayout } from './imageLayout'
 import type { PageLayout } from './organize'
 import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } from './documentTools'
+import type { MetadataChanges, MetadataSchema } from './metadata'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -58,6 +59,12 @@ async function inspectPdf<T>(path: string, file: File, signal?: AbortSignal): Pr
 }
 export const readForms = (file: File, signal?: AbortSignal) => inspectPdf<FormSchema>('/api/forms/read', file, signal)
 export const readBookmarks = (file: File, signal?: AbortSignal) => inspectPdf<BookmarkSchema>('/api/bookmarks/read', file, signal)
+export const readMetadata = (file: File, signal?: AbortSignal) => inspectPdf<MetadataSchema>('/api/metadata/read', file, signal)
+export function writeMetadata(file: File, changes: MetadataChanges, clear: boolean, signal?: AbortSignal): Promise<File> {
+  const body = pdfBody(file)
+  body.append('changes', JSON.stringify(changes)); body.append('clear', String(clear))
+  return post('/api/metadata', body, 'metadata.pdf', pdfPassword(file), signal)
+}
 export function fillForms(file: File, values: Record<string, FormValue>, flatten: boolean, signal?: AbortSignal): Promise<File> {
   const body = pdfBody(file)
   body.append('values', JSON.stringify(values)); body.append('flatten', String(flatten))

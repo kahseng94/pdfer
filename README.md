@@ -139,6 +139,51 @@ The app does not execute those actions. Preview the generated PDF, then
 download the exact result or pass it to another tool. Up to 2000 bookmarks
 and 17 nesting levels are supported; protected copies keep their password.
 
+### Metadata
+
+Use **Metadata** to view and edit a PDF's title, author, subject and keywords.
+Each field offers **Keep original**, **Edit**, and **Clear field**. Keep leaves
+both original representations untouched, including any existing disagreement;
+Edit updates that field in both XMP and legacy DocumentInfo. The UI shows both
+stored values, preferring XMP for the editable starting value. Choosing Edit
+and applying the displayed value explicitly reconciles a conflict. Clear field
+removes the property from both stores; an empty edit is rejected rather than
+silently interpreted as deletion. Values can contain Unicode, up to 5000
+characters per edited field.
+
+Author edits store one author value; existing multi-author lists stay intact
+when kept. Subject means the document description (`dc:description`), and
+keywords means PDF keywords (`pdf:Keywords`); the separate XMP `dc:subject`
+keyword list is preserved. Title and subject edits also update language
+variants whose text matches the old default, following pikepdf's XMP editing
+behavior; translations with different text are preserved. Clearing either
+field removes all its translations. Creator,
+producer, creation/modification dates and metadata date are shown read-only,
+as stored, and remain unchanged during ordinary edits. Custom metadata and
+all other unedited fields are preserved. The implementation uses pikepdf's
+supported metadata editing/copying and DocumentInfo conversion APIs.
+
+**Clear document metadata** stages removal of the entire document XMP packet
+and DocumentInfo dictionary, including custom fields and the read-only fields.
+**Reset changes** cancels this choice. This is not a complete privacy scrub:
+comments, attachments, page/image metadata, and other hidden content elsewhere
+in the PDF remain. Malformed or unsupported document metadata disables ordinary
+edits to avoid silent repair/data loss; explicit document clearing is still
+available. Unsupported structured values and ambiguous language alternatives
+are rejected before editing. Unreadable metadata is labeled **Unavailable**,
+separately from absent fields and empty values.
+
+Preview builds a new copy, reads its metadata back, and renders its actual
+pages before offering **Download PDF** or a handoff to another tool. Changes
+invalidate previous results, and cancelled or superseded work cannot offer a
+stale download. Source files are never overwritten. Pages, selectable text,
+images, bookmarks, forms, annotations and attachments are retained. Existing
+encryption, user and owner passwords, permissions and the metadata-encryption
+setting are preserved, including PDFs that open with an empty user password.
+As with other PDF rewrites, existing cryptographic signatures are
+not preserved as valid signatures. All processing stays local; this tool needs
+no new dependency or cloud service.
+
 ### Permanent redaction
 
 Use **Redact** to mark rectangles on the displayed PDF pages. Drag to mark
@@ -515,6 +560,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/signatures.py local persistent signature-image library
   src/pdfer/forms.py     canonical AcroForm values, widget appearances and flattening
   src/pdfer/bookmarks.py outline reading/editing with preserved destinations
+  src/pdfer/metadata.py  targeted XMP/DocumentInfo edits and explicit document-metadata clearing
   src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
   src/pdfer/ocr.py       local OCR process dispatch, rotation and invisible text-layer assembly
   src/pdfer/paddle_ocr.py optional PP-OCRv6 runtime discovery
@@ -524,7 +570,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
   src/components/OcrTool.tsx OCR languages, ranges, progress and preview
@@ -556,6 +602,8 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/forms/fill` | `file`, `values` (JSON object keyed by field ID), optional `flatten` (default false), optional `password` | `<name>_filled.pdf` |
 | `POST /api/bookmarks/read` | `file`, optional `password` | bookmark titles, source IDs, destination pages and nesting levels |
 | `POST /api/bookmarks` | `file`, `entries` (JSON array), optional `password` | `<name>_bookmarks.pdf` |
+| `POST /api/metadata/read` | `file`, optional `password` | XMP and DocumentInfo values, conflicts, read-only fields, store presence and editability warnings |
+| `POST /api/metadata` | `file`, optional `changes` (JSON object: omitted field = keep, string = edit, null = clear), `clear` (default false), `password` | `<name>_metadata.pdf`; `clear=true` removes both document metadata stores and cannot be combined with field edits |
 | `POST /api/redact` | `pages` (already-masked PNG images), `sizes` (JSON array of physical width/height in points), optional output `password` | a new image-only PDF; the browser names it `<name>_redacted.pdf` |
 | `POST /api/edit` | `file`, `edits`, `images` (0 or more), optional `password` | `<name>_edited.pdf` |
 | `GET /api/signatures` | | metadata for locally saved signature images |
