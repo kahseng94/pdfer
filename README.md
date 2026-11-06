@@ -484,13 +484,29 @@ response headers. Imports are limited to PNG/JPEG files under 10 MB and
 16 million pixels; saved images are normalized to PNG, at most 1600 pixels
 on the longest side, with source metadata removed.
 
-### Batch PDF compression
+### PDF compression and target sizes
 
 Drop or choose several PDFs in **Compress**, then choose Light, Balanced or
 Strong. Add more PDFs to the current batch or remove individual files before
 running it. Each row shows its original and compressed size, bytes saved,
 and percentage saved. PDFs that do not get smaller are included unchanged.
 Duplicate output filenames are made unique so every input stays in the ZIP.
+
+Enable **Fit each PDF to a target size** to request, for example, at most
+**2 MB** per PDF. Targets use decimal units: 1 KB = 1,000 bytes and 1 MB =
+1,000,000 bytes; the allowed range is 1 KB–500 MB, in whole bytes. The target
+replaces the preset level while enabled. Each row shows the measured result
+size, target and whether it was met. Inputs already within the limit keep
+their exact original bytes. If the target cannot be reached, the smallest
+result found within the quality floor is offered with **Target not met**.
+Text-only PDFs and images that cannot safely be recompressed may have little
+or no size reduction. The limit applies to each PDF, not to the ZIP archive.
+
+Review the actual result with page navigation, **Original** / **Result**
+switching or **Side by side** comparison. A batch has a PDF selector and
+individual downloads/tool handoff as well as **Download ZIP**. Downloads
+reuse the exact preview files; they do not rerun compression. Results are
+offered for download after the selected result page renders successfully.
 
 Compression runs one PDF at a time with per-file progress and cancellation.
 Protected inputs prompt for their own passwords, and each resulting PDF
@@ -501,9 +517,11 @@ Several PDFs produce **Download ZIP**; a single PDF keeps the existing direct
 download and tool handoff options. Combined savings describe the PDFs inside
 the archive; the ZIP's own size is shown separately. No download starts
 automatically, and a failed or cancelled batch never offers a partial ZIP.
-Changing the level or adding/removing inputs cancels any active batch and
+Changing the level, target or units, or adding/removing inputs cancels any active batch and
 clears outdated results. For very large archives, split the inputs into
-smaller batches.
+smaller batches. Cancellation stops the server search between images and
+candidate rewrites; a native image encode or PDF save already in progress
+finishes before it can stop. Cancelled or superseded results are discarded.
 
 Image compression keeps its separate workflow. If a drop contains both PDFs
 and images, all PDFs are added and the skipped images are reported; add the
@@ -684,7 +702,7 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/unlock` | `file`, optional `password` | `<name>_unlocked.pdf` |
 | `GET /api/fonts` | | JSON: each family's embedded fonts in fallback order, and the code points they cover |
 | `GET /api/fonts/<name>` | | the TrueType file, for previews |
-| `POST /api/compress` | `file`, `level`, optional `password` | `<name>_compressed.pdf`, with `X-Original-Size` and `X-Compressed-Size` headers in bytes |
+| `POST /api/compress` | `file`, `level`, optional `password`, optional `max_bytes` (integer, 1,000–500,000,000) | `<name>_compressed.pdf`, with measured `X-Original-Size` and `X-Compressed-Size`; target requests also return `X-Target-Size` and `X-Target-Met` (`true`/`false`) |
 | `POST /api/compress-images` | `files` (1 or more), `level`, `format`, `max_kb` | `<name>_compressed.<ext>`, or a zip if there are several, with the same size headers plus `X-Results` |
 | `POST /api/images` | `files` (JPEG or PNG, 1 or more, in order), optional `paper`, `orientation`, `margin_mm`, `fit` | `images.pdf`, one page per image; the same file is previewed and downloaded |
 | `POST /api/photo` | `file` (JPEG or PNG), `crop`, `width`, `height`, `dpi`, `max_kb` | `<name>_passport.jpg`, a JPEG of `width` × `height` pixels |
@@ -772,6 +790,25 @@ compactly; `balanced` and `strong` also re-encode raster images as JPEG,
 downscaled so the longer side is at most 1600 px or 1000 px, while text and
 vector graphics are kept exactly as they are. If nothing gets smaller the
 original file comes back unchanged.
+
+For `/api/compress`, optional `max_bytes` overrides the preset with a bounded,
+deterministic search: a lossless rewrite, then longest-image-side/JPEG-quality
+pairs **2400/90, 2000/85, 1600/75, 1200/65, 1000/60, 800/50**. Every candidate
+starts from the original input to avoid cumulative JPEG loss. The first
+candidate at or below the target wins; if none fits, the smallest measured
+candidate (including the original) wins. This is a fixed quality ladder, not
+a guarantee of the mathematically optimal encoding. It never rasterizes
+whole pages, deletes pages or strips text to satisfy a limit. Text, vector
+content, page boxes and rotation remain intact. Target mode can compress RGB
+and grayscale images with ordinary 8-bit soft transparency masks: colour is
+encoded as JPEG, alpha is encoded losslessly, and both are resized together when
+needed. Resized masks are copied so shared originals stay intact, and colour
+profiles are retained. Complex masks (including colour-key masks and matte
+preblending), indexed colour, CMYK or unsupported encodings are kept; inline
+and annotation/pattern images are left alone. Preset levels continue to leave
+masked images alone. The existing `level` calls, including workflows, work
+unchanged when `max_bytes` is omitted. Encrypted PDFs keep their opening
+password, and their measured result includes encryption overhead.
 
 `/api/compress-images` takes the same levels for pictures on their own: every
 level re-encodes without metadata (EXIF orientation applied first, colour

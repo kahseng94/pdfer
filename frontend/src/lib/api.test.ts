@@ -15,6 +15,24 @@ describe('filenameFrom', () => {
 })
 
 describe('password-aware PDF requests', () => {
+  it('passes an optional target with the password and measures the actual response regardless of headers', async () => {
+    const { file, fetch } = setup()
+    fetch.mockResolvedValueOnce(new Response('x'.repeat(1200), { headers: {
+      'Content-Type': 'application/pdf', 'X-Compressed-Size': '900', 'X-Target-Met': 'true',
+    } }))
+    const signal = new AbortController().signal
+    const result = await compressPdf(file, 'balanced', signal, 1000)
+    const [, request] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect((request.body as FormData).get('max_bytes')).toBe('1000')
+    expect((request.body as FormData).get('password')).toBe('original secret')
+    expect(request.signal).toBe(signal)
+    expect(result).toMatchObject({ before: file.size, after: 1200, target: 1000, targetMet: false })
+    expect(pdfPassword(result.file)).toBe('original secret')
+    await compressPdf(file, 'light')
+    const legacy = fetch.mock.calls[1] as unknown as [string, RequestInit]
+    expect((legacy[1].body as FormData).has('max_bytes')).toBe(false)
+  })
+
   function setup() {
     const file = new File(['source'], 'source.pdf', { type: 'application/pdf' })
     rememberPdfPassword(file, 'original secret')

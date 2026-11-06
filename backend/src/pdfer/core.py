@@ -9,7 +9,7 @@ import math
 import re
 import secrets
 import zlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from io import BytesIO
@@ -393,7 +393,26 @@ _IMAGE_LIMITS: dict[str, tuple[int, int]] = {
 }
 
 
-def compress(data: bytes, level: CompressLevel, name: str = "file", password: str = "") -> bytes:
+MIN_PDF_TARGET = 1_000
+MAX_PDF_TARGET = 500_000_000
+# Ordered quality ladder, always encoded from the source (never from a previous
+# lossy candidate). At most seven rewrites including the lossless candidate.
+_PDF_TARGET_CHOICES = (None, (2400, 90), (2000, 85), (1600, 75), (1200, 65), (1000, 60), (800, 50))
+
+
+class CompressionCancelled(Exception):
+    pass
+
+
+def _check_compression(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled and cancelled():
+        raise CompressionCancelled()
+
+
+def compress(
+    data: bytes, level: CompressLevel, name: str = "file", password: str = "", *,
+    max_bytes: int | None = None, cancelled: Callable[[], bool] | None = None,
+) -> bytes:
     """Return a smaller copy of the PDF, or the original bytes if nothing shrank.
 
     Every level drops unused resources and rewrites the file with object
@@ -401,14 +420,43 @@ def compress(data: bytes, level: CompressLevel, name: str = "file", password: st
     exactly as they were. "balanced" and "strong" also re-encode raster
     images as JPEG, downscaled so the longer side is at most 1600 px or
     1000 px.
+
+    With max_bytes, try a lossless rewrite followed by a fixed quality ladder.
+    Stop at the first candidate that fits; if none fits, return the smallest
+    measured candidate (including the original). Text and vectors are never
+    rasterized. Cancellation is checked between images, saves and candidates.
     """
     if level not in ("light", "balanced", "strong"):
         raise PdfToolError(f"{level!r} isn't a compression level: light, balanced or strong.")
+    if max_bytes is not None and (type(max_bytes) is not int or not MIN_PDF_TARGET <= max_bytes <= MAX_PDF_TARGET):
+        raise PdfToolError("PDF target must be a whole number of bytes from 1,000 to 500,000,000.")
 
+    _check_compression(cancelled)
+    # Validate even already-small files, including their opening password.
+    if max_bytes is not None and len(data) <= max_bytes:
+        with _open(data, name, password):
+            return data
+    choices = _PDF_TARGET_CHOICES if max_bytes is not None else (_IMAGE_LIMITS.get(level),)
+    best = data
+    for choice in choices:
+        _check_compression(cancelled)
+        candidate = _compress_candidate(data, name, password, choice, cancelled, soft_masks=max_bytes is not None)
+        _check_compression(cancelled)
+        if len(candidate) < len(best):
+            best = candidate
+        if max_bytes is not None and len(best) <= max_bytes:
+            break
+    return best
+
+
+def _compress_candidate(
+    data: bytes, name: str, password: str, choice: tuple[int, int] | None,
+    cancelled: Callable[[], bool] | None, *, soft_masks: bool = False,
+) -> bytes:
     with _open(data, name, password) as pdf:
-        if level in _IMAGE_LIMITS:
-            max_side, quality = _IMAGE_LIMITS[level]
-            _recompress_images(pdf, max_side, quality)
+        if choice:
+            _recompress_images(pdf, *choice, cancelled, soft_masks=soft_masks)
+        _check_compression(cancelled)
         pdf.remove_unreferenced_resources()
         out = BytesIO()
         pdf.save(
@@ -418,12 +466,13 @@ def compress(data: bytes, level: CompressLevel, name: str = "file", password: st
             recompress_flate=True,
             encryption=_encryption(password) if pdf.is_encrypted else False,
         )
-        result = out.getvalue()
-
-    return result if len(result) < len(data) else data
+        return out.getvalue()
 
 
-def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int) -> None:
+def _recompress_images(
+    pdf: pikepdf.Pdf, max_side: int, quality: int, cancelled: Callable[[], bool] | None = None, *,
+    soft_masks: bool = False,
+) -> None:
     """Re-encode the raster images on every page in place.
 
     Images inside form XObjects are handled too, however deeply nested.
@@ -431,12 +480,24 @@ def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int) -> None:
     annotation appearance images are left alone.
     """
     seen: set[tuple[int, int]] = set()
+    if soft_masks:
+        # A soft mask can also be referenced as an ordinary page image. Never
+        # JPEG-encode alpha data or mutate a mask shared by other images.
+        for obj in pdf.objects:
+            _check_compression(cancelled)
+            if isinstance(obj, pikepdf.Stream):
+                mask = obj.get("/SMask")
+                if isinstance(mask, pikepdf.Stream):
+                    seen.add(mask.objgen)
     for page in pdf.pages:
-        _recompress_xobjects(page.obj, max_side, quality, seen)
+        _check_compression(cancelled)
+        _recompress_xobjects(page.obj, max_side, quality, seen, cancelled, pdf if soft_masks else None)
 
 
 def _recompress_xobjects(
-    container: pikepdf.Object, max_side: int, quality: int, seen: set[tuple[int, int]]
+    container: pikepdf.Object, max_side: int, quality: int, seen: set[tuple[int, int]],
+    cancelled: Callable[[], bool] | None = None,
+    mask_owner: pikepdf.Pdf | None = None,
 ) -> None:
     """Walk the XObjects of a page or form, recursing into nested forms."""
     resources = container.get("/Resources")
@@ -445,6 +506,7 @@ def _recompress_xobjects(
         return
 
     for _, obj in xobjects.items():
+        _check_compression(cancelled)
         if not isinstance(obj, pikepdf.Stream):
             continue
         # The same image (or form) can be shared between pages, and forms can
@@ -457,9 +519,66 @@ def _recompress_xobjects(
 
         subtype = obj.get("/Subtype")
         if subtype == pikepdf.Name.Form:
-            _recompress_xobjects(obj, max_side, quality, seen)
+            _recompress_xobjects(obj, max_side, quality, seen, cancelled, mask_owner)
         elif subtype == pikepdf.Name.Image:
-            _recompress_image(obj, max_side, quality)
+            if mask_owner is not None and "/SMask" in obj:
+                _recompress_soft_mask_image(mask_owner, obj, max_side, quality)
+            else:
+                _recompress_image(obj, max_side, quality)
+
+
+def _recompress_soft_mask_image(pdf: pikepdf.Pdf, obj: pikepdf.Stream, max_side: int, quality: int) -> None:
+    """Compress colour and resize alpha together, retaining PDF transparency.
+
+    Only target mode uses this path. Complex masks stay untouched; an ordinary
+    8-bit soft mask is encoded losslessly and cloned when resized, so other images
+    sharing it are unaffected. The original colour space/ICC profile is kept.
+    """
+    mask = obj.get("/SMask")
+    if not isinstance(mask, pikepdf.Stream) or "/Mask" in obj or "/Decode" in obj:
+        return
+    if any(key in mask for key in ("/Matte", "/Decode", "/SMask", "/Mask")):
+        return
+    try:
+        image, alpha_image = pikepdf.PdfImage(obj), pikepdf.PdfImage(mask)
+        if (image.image_mask or image.indexed or image.bits_per_component != 8 or image.mode not in ("RGB", "L")
+                or alpha_image.image_mask or alpha_image.bits_per_component != 8 or mask.get("/ColorSpace") != pikepdf.Name.DeviceGray
+                or image.size != alpha_image.size):
+            return
+        colour = image.as_pil_image(apply_mask=False).convert(image.mode)
+        alpha = alpha_image.as_pil_image(apply_mask=False).convert("L")
+    except Exception:  # noqa: BLE001 - keep unsupported/corrupt image encodings
+        return
+
+    original_size = colour.size
+    if max(original_size) > max_side:
+        # Pillow resizes RGBA/LA using premultiplied alpha, avoiding colour
+        # bleeding from transparent pixels into the visible image edges.
+        colour.putalpha(alpha)
+        scale = max_side / max(original_size)
+        colour = colour.resize(tuple(max(1, round(side * scale)) for side in original_size), Image.Resampling.LANCZOS)
+        alpha = colour.getchannel("A")
+        colour = colour.convert(image.mode)
+
+    encoded = BytesIO()
+    colour.save(encoded, format="JPEG", quality=quality, optimize=True)
+    jpeg = encoded.getvalue()
+    resized = colour.size != original_size
+    alpha_bytes = zlib.compress(alpha.tobytes()) if resized else mask.read_raw_bytes()
+    if len(jpeg) + len(alpha_bytes) >= len(obj.read_raw_bytes()) + len(mask.read_raw_bytes()):
+        return
+
+    if resized:
+        new_mask = pdf.make_stream(alpha_bytes, Filter=pikepdf.Name.FlateDecode)
+        for key, value in mask.items():
+            if key not in ("/Length", "/Filter", "/DecodeParms", "/Width", "/Height"):
+                new_mask[key] = value
+        new_mask.Width, new_mask.Height = colour.size
+        obj.SMask = new_mask
+    obj.write(jpeg, filter=pikepdf.Name.DCTDecode)
+    obj.Width, obj.Height = colour.size
+    if "/DecodeParms" in obj:
+        del obj["/DecodeParms"]
 
 
 def _recompress_image(obj: pikepdf.Stream, max_side: int, quality: int) -> None:

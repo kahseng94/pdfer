@@ -1,10 +1,11 @@
 """HTTP API for the local web app.
 
 Most endpoints are plain `def` so FastAPI runs CPU-bound PDF work in a thread
-pool. Native OCR runs asynchronously so a disconnected client stops its process.
+pool. OCR and compression watch disconnects to cancel their local work.
 """
 
 import argparse
+import asyncio
 import json
 import threading
 import webbrowser
@@ -337,19 +338,52 @@ def images(
 
 
 @app.post("/api/compress")
-def compress(file: UploadFile, level: Annotated[core.CompressLevel, Form()], password: Annotated[str, Form()] = "") -> Response:
+async def compress(
+    request: Request, file: UploadFile, level: Annotated[core.CompressLevel, Form()],
+    password: Annotated[str, Form()] = "",
+    max_bytes: Annotated[int | None, Form(ge=core.MIN_PDF_TARGET, le=core.MAX_PDF_TARGET)] = None,
+) -> Response:
     """Shrink one PDF.
 
     `light` only rewrites the file more compactly. `balanced` and `strong` also
     re-encode raster images as JPEG, downscaled to at most 1600 px or 1000 px.
     The response carries `X-Original-Size` and `X-Compressed-Size` headers in
     bytes; when nothing shrank the original file is returned unchanged.
+
+    With `max_bytes`, try a bounded image-quality ladder, keeping the first
+    result within the target or the smallest measured result if unreachable.
+    Target headers describe the actual returned bytes; `level` remains the
+    fallback when no target is supplied.
     """
-    data = file.file.read()
-    out = core.compress(data, level, file.filename or "document.pdf", password)
+    data = await file.read()
+    cancelled = threading.Event()
+    task = asyncio.create_task(asyncio.to_thread(
+        core.compress, data, level, file.filename or "document.pdf", password,
+        max_bytes=max_bytes, cancelled=cancelled.is_set,
+    ))
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                cancelled.set()
+                try:
+                    await task
+                except core.CompressionCancelled:
+                    pass
+                return Response(status_code=499)
+            await asyncio.wait({task}, timeout=0.1)
+        out = await task
+    finally:
+        cancelled.set()
+        # If ASGI itself cancels the handler, consume the eventual worker
+        # exception too. Native image encode/save finishes before it can stop.
+        if not task.done():
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
     res = _download(out, f"{_stem(file.filename)}_compressed.pdf", "application/pdf")
     res.headers["X-Original-Size"] = str(len(data))
     res.headers["X-Compressed-Size"] = str(len(out))
+    if max_bytes is not None:
+        res.headers["X-Target-Size"] = str(max_bytes)
+        res.headers["X-Target-Met"] = str(len(out) <= max_bytes).lower()
     return res
 
 
