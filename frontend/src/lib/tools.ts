@@ -7,6 +7,7 @@ export const TOOLS = [
   { id: 'split', label: 'Split', takes: 'pdf' },
   { id: 'organize', label: 'Organize', takes: 'pdf' },
   { id: 'bookmarks', label: 'Bookmarks', takes: 'pdf' },
+  { id: 'metadata', label: 'Metadata', takes: 'pdf' },
   { id: 'text', label: 'Search & text', takes: 'pdf' },
   { id: 'ocr', label: 'OCR', takes: 'pdf' },
   { id: 'edit', label: 'Edit', takes: 'pdf' },

@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import bookmarks, core, fonts, forms, ocr, redactions, signatures
+from pdfer import bookmarks, core, fonts, forms, metadata, ocr, redactions, signatures
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -111,6 +111,16 @@ def read_bookmarks(file: UploadFile, password: Annotated[str, Form()] = "") -> R
 @app.post("/api/bookmarks")
 def write_bookmarks(file: UploadFile, entries: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
     return _download(bookmarks.write(file.file.read(), entries, file.filename or "document.pdf", password), f"{_stem(file.filename)}_bookmarks.pdf", "application/pdf")
+
+
+@app.post("/api/metadata/read")
+def read_metadata(file: UploadFile, password: Annotated[str, Form()] = "") -> Response:
+    return JSONResponse(metadata.read(file.file.read(), file.filename or "document.pdf", password), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/metadata")
+def write_metadata(file: UploadFile, changes: Annotated[str, Form()] = "{}", clear: Annotated[bool, Form()] = False, password: Annotated[str, Form()] = "") -> Response:
+    return _download(metadata.write(file.file.read(), changes, clear, file.filename or "document.pdf", password), f"{_stem(file.filename)}_metadata.pdf", "application/pdf")
 
 
 @app.post("/api/redact")

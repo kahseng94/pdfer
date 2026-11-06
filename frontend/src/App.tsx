@@ -19,6 +19,7 @@ import { TextTool } from './components/TextTool'
 import { OcrTool } from './components/OcrTool'
 import { WorkflowTool } from './components/WorkflowTool'
 import { BookmarksTool } from './components/BookmarksTool'
+import { MetadataTool } from './components/MetadataTool'
 import { FormsTool } from './components/FormsTool'
 import { RedactTool } from './components/RedactTool'
 import { ProjectsPanel } from './components/ProjectsPanel'
@@ -90,6 +91,9 @@ export default function App() {
             </section>
             <section id="panel-bookmarks" role="tabpanel" aria-labelledby="tab-bookmarks" hidden={tool !== 'bookmarks'}>
               <BookmarksTool active={tool === 'bookmarks'} />
+            </section>
+            <section id="panel-metadata" role="tabpanel" aria-labelledby="tab-metadata" hidden={tool !== 'metadata'}>
+              <MetadataTool active={tool === 'metadata'} />
             </section>
             <section id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden={tool !== 'text'}>
               <TextTool active={tool === 'text'} />
