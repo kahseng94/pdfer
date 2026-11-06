@@ -440,7 +440,7 @@ def compress(
     best = data
     for choice in choices:
         _check_compression(cancelled)
-        candidate = _compress_candidate(data, name, password, choice, cancelled)
+        candidate = _compress_candidate(data, name, password, choice, cancelled, soft_masks=max_bytes is not None)
         _check_compression(cancelled)
         if len(candidate) < len(best):
             best = candidate
@@ -451,11 +451,11 @@ def compress(
 
 def _compress_candidate(
     data: bytes, name: str, password: str, choice: tuple[int, int] | None,
-    cancelled: Callable[[], bool] | None,
+    cancelled: Callable[[], bool] | None, *, soft_masks: bool = False,
 ) -> bytes:
     with _open(data, name, password) as pdf:
         if choice:
-            _recompress_images(pdf, *choice, cancelled)
+            _recompress_images(pdf, *choice, cancelled, soft_masks=soft_masks)
         _check_compression(cancelled)
         pdf.remove_unreferenced_resources()
         out = BytesIO()
@@ -469,7 +469,10 @@ def _compress_candidate(
         return out.getvalue()
 
 
-def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int, cancelled: Callable[[], bool] | None = None) -> None:
+def _recompress_images(
+    pdf: pikepdf.Pdf, max_side: int, quality: int, cancelled: Callable[[], bool] | None = None, *,
+    soft_masks: bool = False,
+) -> None:
     """Re-encode the raster images on every page in place.
 
     Images inside form XObjects are handled too, however deeply nested.
@@ -477,14 +480,24 @@ def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int, cancelled:
     annotation appearance images are left alone.
     """
     seen: set[tuple[int, int]] = set()
+    if soft_masks:
+        # A soft mask can also be referenced as an ordinary page image. Never
+        # JPEG-encode alpha data or mutate a mask shared by other images.
+        for obj in pdf.objects:
+            _check_compression(cancelled)
+            if isinstance(obj, pikepdf.Stream):
+                mask = obj.get("/SMask")
+                if isinstance(mask, pikepdf.Stream):
+                    seen.add(mask.objgen)
     for page in pdf.pages:
         _check_compression(cancelled)
-        _recompress_xobjects(page.obj, max_side, quality, seen, cancelled)
+        _recompress_xobjects(page.obj, max_side, quality, seen, cancelled, pdf if soft_masks else None)
 
 
 def _recompress_xobjects(
     container: pikepdf.Object, max_side: int, quality: int, seen: set[tuple[int, int]],
     cancelled: Callable[[], bool] | None = None,
+    mask_owner: pikepdf.Pdf | None = None,
 ) -> None:
     """Walk the XObjects of a page or form, recursing into nested forms."""
     resources = container.get("/Resources")
@@ -506,9 +519,66 @@ def _recompress_xobjects(
 
         subtype = obj.get("/Subtype")
         if subtype == pikepdf.Name.Form:
-            _recompress_xobjects(obj, max_side, quality, seen, cancelled)
+            _recompress_xobjects(obj, max_side, quality, seen, cancelled, mask_owner)
         elif subtype == pikepdf.Name.Image:
-            _recompress_image(obj, max_side, quality)
+            if mask_owner is not None and "/SMask" in obj:
+                _recompress_soft_mask_image(mask_owner, obj, max_side, quality)
+            else:
+                _recompress_image(obj, max_side, quality)
+
+
+def _recompress_soft_mask_image(pdf: pikepdf.Pdf, obj: pikepdf.Stream, max_side: int, quality: int) -> None:
+    """Compress colour and resize alpha together, retaining PDF transparency.
+
+    Only target mode uses this path. Complex masks stay untouched; an ordinary
+    8-bit soft mask is encoded losslessly and cloned when resized, so other images
+    sharing it are unaffected. The original colour space/ICC profile is kept.
+    """
+    mask = obj.get("/SMask")
+    if not isinstance(mask, pikepdf.Stream) or "/Mask" in obj or "/Decode" in obj:
+        return
+    if any(key in mask for key in ("/Matte", "/Decode", "/SMask", "/Mask")):
+        return
+    try:
+        image, alpha_image = pikepdf.PdfImage(obj), pikepdf.PdfImage(mask)
+        if (image.image_mask or image.indexed or image.bits_per_component != 8 or image.mode not in ("RGB", "L")
+                or alpha_image.image_mask or alpha_image.bits_per_component != 8 or mask.get("/ColorSpace") != pikepdf.Name.DeviceGray
+                or image.size != alpha_image.size):
+            return
+        colour = image.as_pil_image(apply_mask=False).convert(image.mode)
+        alpha = alpha_image.as_pil_image(apply_mask=False).convert("L")
+    except Exception:  # noqa: BLE001 - keep unsupported/corrupt image encodings
+        return
+
+    original_size = colour.size
+    if max(original_size) > max_side:
+        # Pillow resizes RGBA/LA using premultiplied alpha, avoiding colour
+        # bleeding from transparent pixels into the visible image edges.
+        colour.putalpha(alpha)
+        scale = max_side / max(original_size)
+        colour = colour.resize(tuple(max(1, round(side * scale)) for side in original_size), Image.Resampling.LANCZOS)
+        alpha = colour.getchannel("A")
+        colour = colour.convert(image.mode)
+
+    encoded = BytesIO()
+    colour.save(encoded, format="JPEG", quality=quality, optimize=True)
+    jpeg = encoded.getvalue()
+    resized = colour.size != original_size
+    alpha_bytes = zlib.compress(alpha.tobytes()) if resized else mask.read_raw_bytes()
+    if len(jpeg) + len(alpha_bytes) >= len(obj.read_raw_bytes()) + len(mask.read_raw_bytes()):
+        return
+
+    if resized:
+        new_mask = pdf.make_stream(alpha_bytes, Filter=pikepdf.Name.FlateDecode)
+        for key, value in mask.items():
+            if key not in ("/Length", "/Filter", "/DecodeParms", "/Width", "/Height"):
+                new_mask[key] = value
+        new_mask.Width, new_mask.Height = colour.size
+        obj.SMask = new_mask
+    obj.write(jpeg, filter=pikepdf.Name.DCTDecode)
+    obj.Width, obj.Height = colour.size
+    if "/DecodeParms" in obj:
+        del obj["/DecodeParms"]
 
 
 def _recompress_image(obj: pikepdf.Stream, max_side: int, quality: int) -> None:

@@ -86,7 +86,7 @@ def test_search_is_bounded_uses_source_and_keeps_best_even_when_sizes_are_not_mo
     source = b"original" * 1000
     seen = []
     sizes = iter([7000, 6000, 3000, 4000, 5000, 3500, 4500])
-    def candidate(data, _name, _password, choice, _cancelled):
+    def candidate(data, _name, _password, choice, _cancelled, **_kwargs):
         assert data is source
         seen.append(choice)
         return b"x" * next(sizes)
@@ -98,7 +98,7 @@ def test_search_is_bounded_uses_source_and_keeps_best_even_when_sizes_are_not_mo
 
 def test_search_stops_at_first_fitting_candidate(monkeypatch):
     seen = []
-    def candidate(_data, _name, _password, choice, _cancelled):
+    def candidate(_data, _name, _password, choice, _cancelled, **_kwargs):
         seen.append(choice)
         return b"x" * (1500 if choice is None else 1000)
     monkeypatch.setattr(core, "_compress_candidate", candidate)
@@ -115,7 +115,7 @@ def test_core_rejects_invalid_targets(target):
 def test_cancellation_does_not_return_an_intermediate_candidate(monkeypatch):
     cancelled = threading.Event()
     calls = []
-    def candidate(*_args):
+    def candidate(*_args, **_kwargs):
         calls.append(1)
         cancelled.set()
         return b"partial"

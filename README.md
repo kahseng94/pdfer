@@ -683,9 +683,14 @@ candidate at or below the target wins; if none fits, the smallest measured
 candidate (including the original) wins. This is a fixed quality ladder, not
 a guarantee of the mathematically optimal encoding. It never rasterizes
 whole pages, deletes pages or strips text to satisfy a limit. Text, vector
-content, page boxes and rotation remain intact. Images with masks, indexed
-colour, CMYK or unsupported encodings are kept; inline and annotation/pattern
-images are left alone. The existing `level` calls, including workflows, work
+content, page boxes and rotation remain intact. Target mode can compress RGB
+and grayscale images with ordinary 8-bit soft transparency masks: colour is
+encoded as JPEG, alpha is encoded losslessly, and both are resized together when
+needed. Resized masks are copied so shared originals stay intact, and colour
+profiles are retained. Complex masks (including colour-key masks and matte
+preblending), indexed colour, CMYK or unsupported encodings are kept; inline
+and annotation/pattern images are left alone. Preset levels continue to leave
+masked images alone. The existing `level` calls, including workflows, work
 unchanged when `max_bytes` is omitted. Encrypted PDFs keep their opening
 password, and their measured result includes encryption overhead.
 
