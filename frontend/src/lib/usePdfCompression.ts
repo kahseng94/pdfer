@@ -4,12 +4,22 @@ import { closePdf, type PDFDocumentProxy } from './pdf'
 import { compressPdfBatch, PdfCompressionError, type PdfCompressionBatch, type PdfCompressionProgress } from './pdfCompression'
 import { usePdfLoader } from './usePdfLoader'
 import { useResult } from './result'
+import { parsePdfTarget, type PdfTargetUnit } from './pdfTarget'
 
 export type PdfCompressionItem = { id: string; file: File; doc: PDFDocumentProxy | null; error: string | null }
 
 export function usePdfCompression() {
   const [items, setItems] = useState<PdfCompressionItem[]>([])
   const [level, setLevel] = useState<CompressLevel>('balanced')
+  const [targetEnabled, setTargetEnabled] = useState(false)
+  const [targetValue, setTargetValue] = useState('2')
+  const [targetUnit, setTargetUnit] = useState<PdfTargetUnit>('MB')
+  let maxBytes: number | undefined
+  let targetError: string | null = null
+  if (targetEnabled) {
+    try { maxBytes = parsePdfTarget(targetValue, targetUnit) }
+    catch (error) { targetError = (error as Error).message }
+  }
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<PdfCompressionProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +28,7 @@ export function usePdfCompression() {
   const documents = useRef(new Map<string, PDFDocumentProxy>())
   const opening = useRef(new Map<string, symbol>())
   const loader = usePdfLoader()
-  const result = useResult<PdfCompressionBatch>([level, ...items.map((item) => item.id)])
+  const result = useResult<PdfCompressionBatch>([level, targetEnabled, targetValue, targetUnit, ...items.map((item) => item.id)])
 
   useEffect(() => () => {
     opening.current.clear()
@@ -97,8 +107,15 @@ export function usePdfCompression() {
     setLevel(next)
   }
 
+  function changeTarget(enabled: boolean, value = targetValue, unit = targetUnit) {
+    invalidate()
+    setTargetEnabled(enabled)
+    setTargetValue(value)
+    setTargetUnit(unit)
+  }
+
   async function run() {
-    if (pending.current || !items.length || items.some((item) => !item.doc || item.error)) return
+    if (pending.current || targetError || !items.length || items.some((item) => !item.doc || item.error)) return
     invalidate()
     const controller = new AbortController()
     pending.current = controller
@@ -107,7 +124,7 @@ export function usePdfCompression() {
     try {
       const output = await compressPdfBatch(items.map((item) => item.file), level, controller.signal, (next) => {
         if (pending.current === controller && !controller.signal.aborted) setProgress(next)
-      })
+      }, maxBytes)
       if (pending.current === controller && !controller.signal.aborted) finish(output)
     } catch (error) {
       if (pending.current === controller && !controller.signal.aborted) {
@@ -119,5 +136,5 @@ export function usePdfCompression() {
     }
   }
 
-  return { items, level, busy, progress, error, failedId, result: result.value, dismiss: result.clear, add, remove, retry, clear, changeLevel, run, cancel }
+  return { items, level, targetEnabled, targetValue, targetUnit, targetError, changeTarget, busy, progress, error, failedId, result: result.value, dismiss: result.clear, add, remove, retry, clear, changeLevel, run, cancel }
 }

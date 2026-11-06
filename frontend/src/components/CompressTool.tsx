@@ -7,6 +7,8 @@ import { formatSize } from '../lib/pdf'
 import { pdfPassword } from '../lib/passwords'
 import type { PdfCompressionResult } from '../lib/pdfCompression'
 import { usePdfCompression, type PdfCompressionItem } from '../lib/usePdfCompression'
+import type { PdfTargetUnit } from '../lib/pdfTarget'
+import { PdfCompressionPreview, PdfTargetStatus } from './PdfCompressionPreview'
 import { useResult } from '../lib/result'
 import { useWindowDrop } from '../lib/windowDrop'
 import { Dropzone } from './Dropzone'
@@ -180,9 +182,20 @@ function PdfCompress({ batch, onAdd, onClear }: {
         </ul>
         <Dropzone kind="pdf" multiple compact title="Add more PDFs" onFiles={onAdd} />
       </div>
-      <LevelPicker name="compress-level" levels={PDF_LEVELS} value={batch.level} onChange={batch.changeLevel}>
+      <div className="space-y-3">
+        <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={batch.targetEnabled} onChange={(event) => batch.changeTarget(event.target.checked)} />Fit each PDF to a target size</label>
+        {batch.targetEnabled && <>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="space-y-1 text-sm">Target size (at most)<input aria-label="PDF target size" type="text" inputMode="decimal" value={batch.targetValue} onChange={(event) => batch.changeTarget(true, event.target.value)} className={`${FIELD} block w-36`} /></label>
+            <label className="space-y-1 text-sm">Unit<select aria-label="PDF target unit" value={batch.targetUnit} onChange={(event) => batch.changeTarget(true, batch.targetValue, event.target.value as PdfTargetUnit)} className={`${FIELD} block`}><option>KB</option><option>MB</option></select></label>
+          </div>
+          <p className="text-sm text-zinc-500">1 KB = 1,000 bytes; 1 MB = 1,000,000 bytes. Range: 1 KB–500 MB per PDF. We try progressively smaller images while preserving text and vectors. Some targets cannot be reached without going below the quality floor.</p>
+          {batch.targetError && <ErrorMessage>{batch.targetError}</ErrorMessage>}
+        </>}
+      </div>
+      {!batch.targetEnabled && <LevelPicker name="compress-level" levels={PDF_LEVELS} value={batch.level} onChange={batch.changeLevel}>
         Text and vector graphics stay exactly as they are at every level. PDFs that cannot shrink are kept unchanged.
-      </LevelPicker>
+      </LevelPicker>}
       <p className="text-sm text-zinc-500">{count > 1 ? 'One compressed PDF per input, bundled into a ZIP. Files with the same name are kept separately.' : 'Add more PDFs to compress them together and download a ZIP.'}</p>
       {items.some((item) => item.doc && pdfPassword(item.file)) && <p className="text-sm text-zinc-500">Each protected PDF keeps its own password.</p>}
       {opening && <p role="status" className="text-sm text-zinc-500">Opening PDFs…</p>}
@@ -192,12 +205,13 @@ function PdfCompress({ batch, onAdd, onClear }: {
         <p role="status" className="break-words">{progress.completed === count ? (count > 1 ? 'Preparing ZIP…' : 'Finishing…') : `Compressing ${progress.current}…`} {progress.completed} of {count} complete</p>
         <progress aria-label="PDF compression progress" value={progress.completed} max={count} className="mt-2 h-2 w-full accent-rose-600" />
       </div>}
-      {result && <ResultCard file={result.file} from="compress" onDismiss={batch.dismiss} downloadLabel={count > 1 ? 'Download ZIP' : 'Download'}>
-        {totals && <>{count > 1 && 'Combined PDF size: '}<PdfSavings {...totals} /></>}
-      </ResultCard>}
+      {result && <>
+        {totals && <p className="text-sm">{count > 1 && 'Combined PDF size: '}<PdfSavings {...totals} /></p>}
+        <PdfCompressionPreview result={result} items={items} onDismiss={batch.dismiss} />
+      </>}
       <div className="sticky bottom-4 space-y-2">
-        <Button onClick={batch.run} disabled={busy || opening || unreadable > 0}>
-          {busy ? 'Compressing…' : count === 1 ? 'Compress' : `Compress ${count} PDFs`}
+        <Button onClick={batch.run} disabled={busy || opening || unreadable > 0 || !!batch.targetError}>
+          {busy ? 'Compressing…' : batch.targetEnabled ? 'Compress and preview' : count === 1 ? 'Compress' : `Compress ${count} PDFs`}
         </Button>
         {busy && <button type="button" onClick={batch.cancel} className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">Cancel compression</button>}
       </div>
@@ -222,6 +236,7 @@ function PdfRow({ item, result, working, queued, failed, onRemove, onRetry }: {
         <p className="text-sm text-zinc-500">{item.doc ? `${item.doc.numPages} ${item.doc.numPages === 1 ? 'page' : 'pages'}` : 'Opening…'} · {formatSize(item.file.size)}{item.doc && pdfPassword(item.file) && ' · Password protected'}</p>
         {result && <>
           <p className="text-sm text-zinc-600 dark:text-zinc-400"><PdfSavings {...result} /></p>
+          <PdfTargetStatus {...result} />
           <p className="truncate text-xs text-zinc-500" title={result.name}>Output: {result.name}</p>
         </>}
         {working && <p className="text-sm text-rose-600 dark:text-rose-400">Compressing…</p>}

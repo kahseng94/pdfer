@@ -1,14 +1,15 @@
 import { Zip, ZipPassThrough } from 'fflate'
 import { compressPdf, type CompressLevel } from './api'
+import { validatePdfTarget } from './pdfTarget'
 
-export type PdfCompressionResult = { name: string; before: number; after: number }
+export type PdfCompressionResult = { name: string; before: number; after: number; target?: number; targetMet?: boolean }
 export type PdfCompressionProgress = {
   completed: number
   total: number
   current: string
   results: readonly PdfCompressionResult[]
 }
-export type PdfCompressionBatch = { file: File; results: PdfCompressionResult[] }
+export type PdfCompressionBatch = { file: File; results: PdfCompressionResult[]; outputs: File[] }
 
 export class PdfCompressionError extends Error {
   readonly index: number
@@ -50,12 +51,15 @@ export async function compressPdfBatch(
   level: CompressLevel,
   signal: AbortSignal,
   onProgress?: (progress: PdfCompressionProgress) => void,
+  maxBytes?: number,
 ): Promise<PdfCompressionBatch> {
   if (!files.length) throw new Error('Choose at least one PDF to compress.')
   if (files.length > 65_535) throw new Error('Choose fewer PDFs for one ZIP.')
   signal.throwIfAborted()
+  if (maxBytes !== undefined) validatePdfTarget(maxBytes)
   const chunks: BlobPart[] = []
   const results: PdfCompressionResult[] = []
+  const outputs: File[] = []
   const used = new Set<string>()
   let single: File | null = null
   let size = 0
@@ -76,7 +80,7 @@ export async function compressPdfBatch(
       signal.throwIfAborted()
       let output: File
       try {
-        output = (await compressPdf(source, level, signal)).file
+        output = (await (maxBytes === undefined ? compressPdf(source, level, signal) : compressPdf(source, level, signal, maxBytes))).file
       } catch (error) {
         signal.throwIfAborted()
         throw new PdfCompressionError(index, source.name, error)
@@ -93,14 +97,17 @@ export async function compressPdfBatch(
         entry.push(bytes, true)
         if (zipError) throw zipError
       } else single = output
-      results.push({ name, before: source.size, after: output.size })
+      outputs.push(output)
+      results.push({ name, before: source.size, after: output.size,
+        ...(maxBytes === undefined ? {} : { target: maxBytes, targetMet: output.size <= maxBytes }),
+      })
       onProgress?.({ completed: index + 1, total: files.length, current: source.name, results: [...results] })
     }
     signal.throwIfAborted()
-    if (single) return { file: single, results }
+    if (single) return { file: single, results, outputs }
     zip!.end()
     if (zipError) throw zipError
-    return { file: new File(chunks, 'pdfs_compressed.zip', { type: 'application/zip' }), results }
+    return { file: new File(chunks, 'pdfs_compressed.zip', { type: 'application/zip' }), results, outputs }
   } finally {
     zip?.terminate()
   }

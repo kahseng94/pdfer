@@ -6,6 +6,7 @@ import type { StampSettings } from './stamps'
 import { effectiveImageLayout, type ImagePdfLayout } from './imageLayout'
 import type { PageLayout } from './organize'
 import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } from './documentTools'
+import { validatePdfTarget } from './pdfTarget'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -200,21 +201,19 @@ export function imagesToPdf(files: File[], layout?: ImagePdfLayout, signal?: Abo
 export type CompressLevel = 'light' | 'balanced' | 'strong'
 
 /** The compressed file and the sizes in bytes. `after` is no smaller than `before` when the backend found nothing to shrink. */
-export async function compressPdf(file: File, level: CompressLevel, signal?: AbortSignal): Promise<{ file: File; before: number; after: number }> {
+export async function compressPdf(file: File, level: CompressLevel, signal?: AbortSignal, maxBytes?: number): Promise<{ file: File; before: number; after: number; target?: number; targetMet?: boolean }> {
   const body = pdfBody(file)
   body.append('level', level)
-  const { file: compressed, headers } = await upload('/api/compress', body, 'compressed.pdf', signal)
+  if (maxBytes !== undefined) body.append('max_bytes', String(validatePdfTarget(maxBytes)))
+  const { file: compressed } = await upload('/api/compress', body, 'compressed.pdf', signal)
+  signal?.throwIfAborted()
   rememberPdfPassword(compressed, pdfPassword(file))
   return {
     file: compressed,
-    before: sizeHeader(headers, 'x-original-size', file.size),
-    after: sizeHeader(headers, 'x-compressed-size', file.size),
+    before: file.size,
+    after: compressed.size,
+    ...(maxBytes === undefined ? {} : { target: maxBytes, targetMet: compressed.size <= maxBytes }),
   }
-}
-
-function sizeHeader(headers: Headers, name: string, fallback: number): number {
-  const n = Number(headers.get(name))
-  return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
 /** Crop a photo to `size` pixels as a JPEG marked `dpi`, kept under `maxKb` when given. */

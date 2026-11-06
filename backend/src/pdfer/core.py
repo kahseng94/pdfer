@@ -9,7 +9,7 @@ import math
 import re
 import secrets
 import zlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from io import BytesIO
@@ -393,7 +393,26 @@ _IMAGE_LIMITS: dict[str, tuple[int, int]] = {
 }
 
 
-def compress(data: bytes, level: CompressLevel, name: str = "file", password: str = "") -> bytes:
+MIN_PDF_TARGET = 1_000
+MAX_PDF_TARGET = 500_000_000
+# Ordered quality ladder, always encoded from the source (never from a previous
+# lossy candidate). At most seven rewrites including the lossless candidate.
+_PDF_TARGET_CHOICES = (None, (2400, 90), (2000, 85), (1600, 75), (1200, 65), (1000, 60), (800, 50))
+
+
+class CompressionCancelled(Exception):
+    pass
+
+
+def _check_compression(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled and cancelled():
+        raise CompressionCancelled()
+
+
+def compress(
+    data: bytes, level: CompressLevel, name: str = "file", password: str = "", *,
+    max_bytes: int | None = None, cancelled: Callable[[], bool] | None = None,
+) -> bytes:
     """Return a smaller copy of the PDF, or the original bytes if nothing shrank.
 
     Every level drops unused resources and rewrites the file with object
@@ -401,14 +420,43 @@ def compress(data: bytes, level: CompressLevel, name: str = "file", password: st
     exactly as they were. "balanced" and "strong" also re-encode raster
     images as JPEG, downscaled so the longer side is at most 1600 px or
     1000 px.
+
+    With max_bytes, try a lossless rewrite followed by a fixed quality ladder.
+    Stop at the first candidate that fits; if none fits, return the smallest
+    measured candidate (including the original). Text and vectors are never
+    rasterized. Cancellation is checked between images, saves and candidates.
     """
     if level not in ("light", "balanced", "strong"):
         raise PdfToolError(f"{level!r} isn't a compression level: light, balanced or strong.")
+    if max_bytes is not None and (type(max_bytes) is not int or not MIN_PDF_TARGET <= max_bytes <= MAX_PDF_TARGET):
+        raise PdfToolError("PDF target must be a whole number of bytes from 1,000 to 500,000,000.")
 
+    _check_compression(cancelled)
+    # Validate even already-small files, including their opening password.
+    if max_bytes is not None and len(data) <= max_bytes:
+        with _open(data, name, password):
+            return data
+    choices = _PDF_TARGET_CHOICES if max_bytes is not None else (_IMAGE_LIMITS.get(level),)
+    best = data
+    for choice in choices:
+        _check_compression(cancelled)
+        candidate = _compress_candidate(data, name, password, choice, cancelled)
+        _check_compression(cancelled)
+        if len(candidate) < len(best):
+            best = candidate
+        if max_bytes is not None and len(best) <= max_bytes:
+            break
+    return best
+
+
+def _compress_candidate(
+    data: bytes, name: str, password: str, choice: tuple[int, int] | None,
+    cancelled: Callable[[], bool] | None,
+) -> bytes:
     with _open(data, name, password) as pdf:
-        if level in _IMAGE_LIMITS:
-            max_side, quality = _IMAGE_LIMITS[level]
-            _recompress_images(pdf, max_side, quality)
+        if choice:
+            _recompress_images(pdf, *choice, cancelled)
+        _check_compression(cancelled)
         pdf.remove_unreferenced_resources()
         out = BytesIO()
         pdf.save(
@@ -418,12 +466,10 @@ def compress(data: bytes, level: CompressLevel, name: str = "file", password: st
             recompress_flate=True,
             encryption=_encryption(password) if pdf.is_encrypted else False,
         )
-        result = out.getvalue()
-
-    return result if len(result) < len(data) else data
+        return out.getvalue()
 
 
-def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int) -> None:
+def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int, cancelled: Callable[[], bool] | None = None) -> None:
     """Re-encode the raster images on every page in place.
 
     Images inside form XObjects are handled too, however deeply nested.
@@ -432,11 +478,13 @@ def _recompress_images(pdf: pikepdf.Pdf, max_side: int, quality: int) -> None:
     """
     seen: set[tuple[int, int]] = set()
     for page in pdf.pages:
-        _recompress_xobjects(page.obj, max_side, quality, seen)
+        _check_compression(cancelled)
+        _recompress_xobjects(page.obj, max_side, quality, seen, cancelled)
 
 
 def _recompress_xobjects(
-    container: pikepdf.Object, max_side: int, quality: int, seen: set[tuple[int, int]]
+    container: pikepdf.Object, max_side: int, quality: int, seen: set[tuple[int, int]],
+    cancelled: Callable[[], bool] | None = None,
 ) -> None:
     """Walk the XObjects of a page or form, recursing into nested forms."""
     resources = container.get("/Resources")
@@ -445,6 +493,7 @@ def _recompress_xobjects(
         return
 
     for _, obj in xobjects.items():
+        _check_compression(cancelled)
         if not isinstance(obj, pikepdf.Stream):
             continue
         # The same image (or form) can be shared between pages, and forms can
@@ -457,7 +506,7 @@ def _recompress_xobjects(
 
         subtype = obj.get("/Subtype")
         if subtype == pikepdf.Name.Form:
-            _recompress_xobjects(obj, max_side, quality, seen)
+            _recompress_xobjects(obj, max_side, quality, seen, cancelled)
         elif subtype == pikepdf.Name.Image:
             _recompress_image(obj, max_side, quality)
 

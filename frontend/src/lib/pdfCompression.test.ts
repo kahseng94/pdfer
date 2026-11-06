@@ -11,6 +11,23 @@ const response = (file: File) => ({ file, before: 9999, after: 9999 })
 afterEach(() => vi.resetAllMocks())
 
 describe('PDF batch compression', () => {
+  it('retains the exact preview files and packages their bytes, reporting mixed target outcomes per PDF', async () => {
+    const first = pdf('same_compressed.pdf', 'x'.repeat(900))
+    const second = pdf('same_compressed.pdf', 'y'.repeat(1500))
+    compress.mockResolvedValueOnce({ ...response(first), targetMet: false })
+    compress.mockResolvedValueOnce({ ...response(second), targetMet: true })
+    const originals = [pdf('same.pdf', 'a'.repeat(2000)), pdf('same.pdf', 'b'.repeat(3000))]
+    const signal = new AbortController().signal
+    const result = await compressPdfBatch(originals, 'balanced', signal, undefined, 1000)
+    expect(result.outputs).toEqual([first, second])
+    expect(result.results.map((entry) => [entry.target, entry.targetMet, entry.after])).toEqual([[1000, true, 900], [1000, false, 1500]])
+    const archive = unzipSync(new Uint8Array(await result.file.arrayBuffer()))
+    for (const [index, entry] of result.results.entries()) {
+      expect(archive[entry.name]).toEqual(new Uint8Array(await result.outputs[index].arrayBuffer()))
+      expect(compress).toHaveBeenNthCalledWith(index + 1, originals[index], 'balanced', signal, 1000)
+    }
+  })
+
   it('returns a readable ZIP with exact result bytes and savings measured from the files', async () => {
     const originals = [pdf('résumé.pdf', 'original-one'), pdf('small.pdf', 'original-two')]
     compress.mockResolvedValueOnce(response(pdf('résumé_compressed.pdf', 'one')))
