@@ -3,9 +3,18 @@
 Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, export text or PDF pages as images, compress images or turn them into a PDF, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
+## Desktop app
+
+Run `pnpm desktop:dev` to open the Electron app, or `pnpm desktop:build` to
+create an installer for this computer. Desktop installers include Python,
+the PDF libraries, and English OCR. PaddleOCR has an optional in-app setup.
+Published releases support **Download update → Restart to update**.
+See [desktop setup and releases](desktop/README.md) for build prerequisites,
+signing, local data, and the GitHub release workflow.
+
 ## Requirements
 
-- Node 20+ and [pnpm](https://pnpm.io/) for the frontend
+- Node 24 and [pnpm](https://pnpm.io/) for the frontend and desktop build
 - [uv](https://docs.astral.sh/uv/) for the backend (installs Python 3.14 for you if needed)
 
 ## Use it

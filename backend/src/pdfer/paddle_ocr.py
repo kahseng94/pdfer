@@ -5,8 +5,9 @@ import os
 import subprocess
 from pathlib import Path
 
-RUNTIME = Path(__file__).resolve().parents[2] / "ocr-runtime"
-SETUP = "Run pnpm ocr:paddle:setup from the project folder, then check again."
+RUNTIME = Path(os.environ.get("PDFER_PADDLE_RUNTIME", Path(__file__).resolve().parents[2] / "ocr-runtime"))
+SETUP = ("Use Install PaddleOCR in the desktop app, then check again." if os.environ.get("PDFER_DESKTOP_TOKEN")
+         else "Run pnpm ocr:paddle:setup from the project folder, then check again.")
 
 
 def python() -> Path:

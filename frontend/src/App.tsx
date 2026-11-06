@@ -24,6 +24,7 @@ import { FormsTool } from './components/FormsTool'
 import { RedactTool } from './components/RedactTool'
 import { ProjectsPanel } from './components/ProjectsPanel'
 import { ProjectContext, useProjectManager } from './lib/useProject'
+import { DesktopUpdates } from './components/DesktopControls'
 
 const CompareTool = lazy(() => import('./components/CompareTool').then((module) => ({ default: module.CompareTool })))
 
@@ -58,6 +59,7 @@ export default function App() {
               </div>
             </header>
 
+            <DesktopUpdates />
             <ProjectsPanel />
 
             <div role="tablist" aria-label="Tool" className="mb-6 inline-flex flex-wrap rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800/70">

@@ -1,0 +1,21 @@
+export type UpdateState = {
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+  currentVersion: string
+  version?: string
+  percent?: number
+  message?: string
+}
+export type OcrSetupState = { status: 'idle' | 'installing' | 'ready' | 'error' | 'unsupported'; message?: string }
+
+export interface DesktopApi {
+  getUpdateState(): Promise<UpdateState>
+  checkForUpdates(): Promise<UpdateState>
+  downloadUpdate(): Promise<UpdateState>
+  installUpdate(): Promise<boolean>
+  onUpdateState(callback: (state: UpdateState) => void): () => void
+  getOcrSetupState(): Promise<OcrSetupState>
+  installOcr(): Promise<OcrSetupState>
+  onOcrSetupState(callback: (state: OcrSetupState) => void): () => void
+}
+
+declare global { interface Window { pdferDesktop?: DesktopApi } }

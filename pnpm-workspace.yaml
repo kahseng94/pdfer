@@ -1,2 +1,6 @@
 packages:
   - frontend
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false

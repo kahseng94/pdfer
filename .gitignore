@@ -8,3 +8,9 @@ __pycache__/
 
 # Optional OCR model weights are installed explicitly, never committed.
 backend/ocr-runtime/models/
+
+# Desktop binaries, installers and build caches
+desktop/build/
+desktop/resources/
+desktop/assets/
+release/

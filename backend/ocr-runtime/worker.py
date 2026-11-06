@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 MODELS = ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec")
-SETUP = "Run pnpm ocr:paddle:setup from the project folder, then check again."
+SETUP = os.environ.get("PDFER_OCR_SETUP_HELP", "Run pnpm ocr:paddle:setup from the project folder, then check again.")
 
 
 def model_root() -> Path:

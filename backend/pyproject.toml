@@ -24,6 +24,7 @@ requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+desktop = ["pyinstaller==6.22.3"]
 dev = [
     "httpx2>=2.13.1",
     "pypdfium2>=5.14.0",

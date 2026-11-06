@@ -10,6 +10,7 @@ import { useWindowDrop } from '../lib/windowDrop'
 import { Dropzone } from './Dropzone'
 import { PdfPages, PdfToolPreview } from './PdfToolPreview'
 import { Button, DropOverlay, ErrorMessage, FIELD } from './ui'
+import { DesktopOcrSetup } from './DesktopControls'
 
 const LANGUAGE_NAMES: Record<string, string> = {
   eng: 'English', fra: 'French', deu: 'German', spa: 'Spanish', ita: 'Italian', por: 'Portuguese',
@@ -70,6 +71,7 @@ export function OcrTool({ active = true }: { active?: boolean }) {
       task.invalidate(); setProgress(null); setStatus(null); setStatusError(null); setLanguages([]); setEngine(event.target.value as OcrEngine)
     }} className={`${FIELD} block w-full py-2`}><option value="tesseract">Tesseract</option><option value="paddleocr">PaddleOCR PP-OCRv6 · medium</option></select></label>
     <div className="space-y-3 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
+      {engine === 'paddleocr' && <DesktopOcrSetup onReady={() => setCheck((value) => value + 1)} />}
       <p role="status">{statusError ?? (status?.available ? engine === 'paddleocr' ? 'PaddleOCR ready · automatic multilingual recognition' : `Local OCR ready · ${status.languages.length} installed ${status.languages.length === 1 ? 'language' : 'languages'}` : status?.message ?? 'Checking the local OCR engine…')}</p>
       <button type="button" onClick={() => { task.invalidate(); setStatus(null); setStatusError(null); setCheck((value) => value + 1) }} className="text-rose-600 hover:underline">Check again</button>
       <details className="text-zinc-500">

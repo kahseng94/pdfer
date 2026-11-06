@@ -1,5 +1,9 @@
 {
   "name": "pdfer",
+  "version": "0.1.0",
+  "description": "Private, local PDF tools for your desktop",
+  "author": "Jayson Ng",
+  "main": "desktop/main.cjs",
   "private": true,
   "scripts": {
     "postinstall": "uv --directory backend sync",
@@ -8,10 +12,21 @@
     "dev:web": "pnpm --filter pdfer-frontend dev",
     "start": "pnpm --filter pdfer-frontend build && uv --directory backend run pdfer",
     "ocr:paddle:setup": "uv run --project backend/ocr-runtime python backend/ocr-runtime/setup_models.py",
-    "test": "uv --directory backend run pytest -q && pnpm --filter pdfer-frontend test"
+    "test": "uv --directory backend run pytest -q && pnpm --filter pdfer-frontend test && pnpm desktop:test",
+    "desktop:dev": "pnpm --filter pdfer-frontend build && electron .",
+    "desktop:backend": "uv run --project backend --group desktop python desktop/build_backend.py",
+    "desktop:build": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && electron-builder --config desktop/electron-builder.cjs --publish never",
+    "desktop:pack": "pnpm --filter pdfer-frontend build && pnpm desktop:backend && electron-builder --config desktop/electron-builder.cjs --dir --publish never",
+    "desktop:test": "node --test desktop/tests/*.test.cjs",
+    "desktop:smoke": "node desktop/tests/smoke.cjs"
   },
   "devDependencies": {
-    "concurrently": "^10.0.6"
+    "concurrently": "^10.0.6",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
   },
-  "packageManager": "pnpm@11.9.0"
+  "packageManager": "pnpm@11.9.0",
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  }
 }
