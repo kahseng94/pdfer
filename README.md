@@ -154,8 +154,10 @@ characters per edited field.
 Author edits store one author value; existing multi-author lists stay intact
 when kept. Subject means the document description (`dc:description`), and
 keywords means PDF keywords (`pdf:Keywords`); the separate XMP `dc:subject`
-keyword list is preserved. Title and subject edits preserve other language
-translations; clearing either field removes all its translations. Creator,
+keyword list is preserved. Title and subject edits also update language
+variants whose text matches the old default, following pikepdf's XMP editing
+behavior; translations with different text are preserved. Clearing either
+field removes all its translations. Creator,
 producer, creation/modification dates and metadata date are shown read-only,
 as stored, and remain unchanged during ordinary edits. Custom metadata and
 all other unedited fields are preserved. The implementation uses pikepdf's
@@ -167,14 +169,18 @@ and DocumentInfo dictionary, including custom fields and the read-only fields.
 comments, attachments, page/image metadata, and other hidden content elsewhere
 in the PDF remain. Malformed or unsupported document metadata disables ordinary
 edits to avoid silent repair/data loss; explicit document clearing is still
-available.
+available. Unsupported structured values and ambiguous language alternatives
+are rejected before editing. Unreadable metadata is labeled **Unavailable**,
+separately from absent fields and empty values.
 
 Preview builds a new copy, reads its metadata back, and renders its actual
 pages before offering **Download PDF** or a handoff to another tool. Changes
 invalidate previous results, and cancelled or superseded work cannot offer a
 stale download. Source files are never overwritten. Pages, selectable text,
-images, bookmarks, forms, annotations, attachments and opening passwords are
-retained. As with other PDF rewrites, existing cryptographic signatures are
+images, bookmarks, forms, annotations and attachments are retained. Existing
+encryption, user and owner passwords, permissions and the metadata-encryption
+setting are preserved, including PDFs that open with an empty user password.
+As with other PDF rewrites, existing cryptographic signatures are
 not preserved as valid signatures. All processing stays local; this tool needs
 no new dependency or cloud service.
 

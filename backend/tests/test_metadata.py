@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from xml.etree import ElementTree as ET
 
 import pikepdf
 import pypdfium2 as pdfium
@@ -57,11 +58,107 @@ def edit(source, changes, **kwargs):
     return metadata.write(source, json.dumps(changes), **kwargs)
 
 
+def with_xmp(fragment):
+    packet = f'''<x:xmpmeta xmlns:x="adobe:ns:meta/">
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:custom="https://example.com/custom/">
+        {fragment}
+    </rdf:Description></rdf:RDF></x:xmpmeta>'''.encode()
+    with pikepdf.open(BytesIO(make_pdf([200]))) as pdf:
+        pdf.Root.Metadata = pdf.make_stream(packet, Type=pikepdf.Name.Metadata, Subtype=pikepdf.Name.XML)
+        return save(pdf)
+
+
+@pytest.mark.parametrize("clear", [False, True])
+@pytest.mark.parametrize("revision", [4, 6])
+@pytest.mark.parametrize("user_password,opening", [("reader", "reader"), ("reader", "owner"), ("", ""), ("", "owner")])
+def test_preserves_both_passwords_permissions_and_encryption_settings(clear, revision, user_password, opening):
+    with pikepdf.open(BytesIO(document())) as pdf:
+        output = BytesIO()
+        pdf.save(output, encryption=pikepdf.Encryption(user=user_password, owner="owner", R=revision, metadata=False,
+                 allow=pikepdf.Permissions(extract=False, modify_annotation=False, print_highres=False)), fix_metadata_version=False)
+        source = output.getvalue()
+    result = edit(source, {} if clear else {"title": "Revised"}, clear=clear, password=opening)
+    for password in (user_password, "owner"):
+        with pikepdf.open(BytesIO(source), password=password) as before, pikepdf.open(BytesIO(result), password=password) as after:
+            assert after.is_encrypted
+            assert after.owner_password_matched == before.owner_password_matched
+            assert after.user_password_matched == before.user_password_matched
+            assert after.allow == before.allow
+            assert after.trailer.Encrypt == before.trailer.Encrypt
+            assert fingerprint(after.Root) == fingerprint(before.Root)
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(BytesIO(result), password="wrong")
+
+
+@pytest.mark.parametrize("changes", [{"title": "New metadata title"}, {"title": None}])
+def test_documentinfo_edits_do_not_mutate_shared_bookmark_objects(changes):
+    with pikepdf.open(BytesIO(document())) as pdf:
+        pdf.docinfo = pdf.Root.Outlines.First
+        source = save(pdf)
+    result = edit(source, changes)
+    with pikepdf.open(BytesIO(source)) as before, pikepdf.open(BytesIO(result)) as after:
+        assert fingerprint(after.Root) == fingerprint(before.Root)
+        assert after.docinfo.objgen != after.Root.Outlines.First.objgen
+        assert after.Root.Outlines.First.Title == "Chapter"
+
+
+@pytest.mark.parametrize("fragment", [
+    '<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Old</rdf:li><rdf:li xml:lang="x-default">Stale</rdf:li></rdf:Alt></dc:title>',
+    '<dc:description><rdf:Alt><rdf:li>Missing language</rdf:li></rdf:Alt></dc:description>',
+    '<pdf:Keywords rdf:resource="urn:original"/>',
+    '<pdf:Keywords rdf:parseType="Resource"><rdf:value>Old</rdf:value><custom:note>Qualifier</custom:note></pdf:Keywords>',
+    '<dc:title><rdf:Alt><rdf:li xml:lang="X-DEFAULT">Old</rdf:li></rdf:Alt></dc:title>',
+    '<dc:title rdf:resource="urn:original"><rdf:Alt><rdf:li xml:lang="x-default">Old</rdf:li></rdf:Alt></dc:title>',
+    '<dc:creator><rdf:Seq><rdf:li rdf:resource="urn:author"/></rdf:Seq></dc:creator>',
+    '<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Old</rdf:li></rdf:Alt><custom:note>Hidden structure</custom:note></dc:title>',
+])
+def test_unsupported_xmp_is_flagged_before_editing_and_remains_clearable(fragment):
+    source = with_xmp(fragment)
+    schema = metadata.read(source)
+    assert not schema["canEdit"] and schema["warnings"]
+    assert not schema["fields"]["title"]["xmpReadable"]
+    assert edit(source, {}) == source
+    with pytest.raises(core.PdfToolError, match="malformed or unsupported"):
+        edit(source, {"title": "Revised"})
+    assert not metadata.read(metadata.write(source, clear=True))["hasXmp"]
+
+
+def test_empty_xmp_values_are_present_and_do_not_disable_editing():
+    source = with_xmp('<dc:title><rdf:Alt><rdf:li xml:lang="x-default"/></rdf:Alt></dc:title><dc:creator><rdf:Seq><rdf:li/></rdf:Seq></dc:creator>')
+    schema = metadata.read(source)
+    assert schema["canEdit"]
+    for key in ("title", "author"):
+        assert schema["fields"][key]["xmp"] == ""
+        assert schema["fields"][key]["documentInfo"] is None
+    result = edit(source, {"keywords": "new"})
+    for key in ("title", "author"):
+        assert metadata.read(result)["fields"][key] == schema["fields"][key]
+
+
+def test_repeated_properties_sync_and_language_variants_follow_pikepdf_semantics():
+    source = with_xmp('<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Menu</rdf:li><rdf:li xml:lang="fr">Menu</rdf:li><rdf:li xml:lang="ja">メニュー</rdf:li></rdf:Alt></dc:title><dc:title>Stale duplicate</dc:title>')
+    result = edit(source, {"title": "Revised"})
+    with pikepdf.open(BytesIO(result)) as pdf:
+        tree = ET.fromstring(pdf.Root.Metadata.read_bytes())
+        titles = list(tree.iter('{http://purl.org/dc/elements/1.1/}title'))
+        assert len(titles) == 1
+        items = {item.get('{http://www.w3.org/XML/1998/namespace}lang'): item.text for item in titles[0][0]}
+        assert items == {"x-default": "Revised", "fr": "Revised", "ja": "メニュー"}
+        assert pdf.docinfo.Title == "Revised"
+    cleared = edit(source, {"title": None})
+    with pikepdf.open(BytesIO(cleared)) as pdf:
+        assert b"Stale duplicate" not in pdf.Root.Metadata.read_bytes()
+        assert "dc:title" not in pdf.open_metadata()
+        assert "/Title" not in pdf.docinfo
+
+
 def test_reads_both_stores_conflicts_authors_and_readonly_dates():
     result = metadata.read(document())
     assert result["canEdit"] and not result["warnings"]
     assert result["hasXmp"] and result["hasDocumentInfo"]
-    assert result["fields"]["title"] == {"xmp": "XMP title", "documentInfo": "Legacy title differs", "value": "XMP title", "conflict": True}
+    assert result["fields"]["title"] == {"xmp": "XMP title", "documentInfo": "Legacy title differs", "value": "XMP title", "conflict": True, "xmpReadable": True, "documentInfoReadable": True}
     assert result["fields"]["author"]["value"] == "Ada; Zoë"
     assert result["fields"]["created"]["documentInfo"] == "D:2020"
 

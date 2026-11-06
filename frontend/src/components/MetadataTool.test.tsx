@@ -16,7 +16,7 @@ vi.mock('./DocumentPreview', () => ({ DocumentPreview: ({ doc, onReady }: { doc:
 
 let root: Root, container: HTMLDivElement
 const sourceSchema = (): MetadataSchema => ({
-  fields: Object.fromEntries([...METADATA_FIELDS, ...METADATA_READ_ONLY].map(({ id }) => [id, { value: `${id} XMP`, xmp: `${id} XMP`, documentInfo: `${id} legacy`, conflict: true }])) as MetadataSchema['fields'],
+  fields: Object.fromEntries([...METADATA_FIELDS, ...METADATA_READ_ONLY].map(({ id }) => [id, { value: `${id} XMP`, xmp: `${id} XMP`, documentInfo: `${id} legacy`, conflict: true, xmpReadable: true, documentInfoReadable: true }])) as MetadataSchema['fields'],
   hasXmp: true, hasDocumentInfo: true, canEdit: true, warnings: [],
 })
 const result = new File(['output'], 'source_metadata.pdf', { type: 'application/pdf' })
@@ -66,7 +66,7 @@ it('keeps fields by default, shows conflicts, and sends explicit edit/clear choi
 it('reads the actual output and waits for its page render before download or handoff', async () => {
   await open()
   const outputSchema = sourceSchema()
-  outputSchema.fields.title = { value: 'Actual output title', xmp: 'Actual output title', documentInfo: 'Actual output title', conflict: false }
+  outputSchema.fields.title = { ...outputSchema.fields.title, value: 'Actual output title', xmp: 'Actual output title', documentInfo: 'Actual output title', conflict: false }
   mocks.read.mockResolvedValue(outputSchema)
   await act(async () => button('Preview metadata changes').click())
   expect(mocks.read.mock.calls[1][0]).toBe(result)
@@ -137,4 +137,32 @@ it('allows clearing malformed metadata and hides results if output inspection fa
   expect(container.textContent).toContain('Could not inspect output')
   expect(container.querySelector('[aria-label="Output preview"]')).toBeNull()
   expect(container.textContent).not.toContain('Download PDF')
+})
+
+it('distinguishes unavailable metadata, empty values and absent fields', async () => {
+  const schema = sourceSchema()
+  schema.canEdit = false; schema.warnings = ['Malformed metadata']
+  schema.fields.title = { ...schema.fields.title, xmp: null, xmpReadable: false, documentInfo: '', value: '', conflict: false }
+  schema.fields.author = { ...schema.fields.author, xmp: null, documentInfo: null, value: null, conflict: false }
+  mocks.read.mockResolvedValue(schema)
+  await open()
+  const title = container.querySelector('#metadata-title')!.parentElement!
+  expect(title.textContent).toContain('Unavailable')
+  expect(title.textContent).toContain('(empty)')
+  expect(title.textContent).not.toContain('Not present')
+  expect(container.querySelector('#metadata-author')!.parentElement!.textContent).toContain('Not present')
+  expect(button('Preview metadata changes').disabled).toBe(true)
+  expect(button('Clear document metadata').disabled).toBe(false)
+})
+
+it('allows 5000 Unicode code points without a browser UTF-16 limit', async () => {
+  const schema = sourceSchema()
+  schema.fields.title = { ...schema.fields.title, value: '🐕'.repeat(5000) }
+  mocks.read.mockResolvedValue(schema)
+  await open()
+  await action('Title', 'edit')
+  expect(container.querySelector('#metadata-title')!.hasAttribute('maxlength')).toBe(false)
+  expect(button('Preview metadata changes').disabled).toBe(false)
+  await act(async () => button('Preview metadata changes').click())
+  expect(mocks.write.mock.calls[0][1]).toEqual({ title: '🐕'.repeat(5000) })
 })

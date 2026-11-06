@@ -12,6 +12,12 @@ it('distinguishes untouched, edited and cleared fields without treating empty in
   expect(metadataProblem({ title: '' })).toContain('Clear field')
   expect(metadataProblem({ title: 'x'.repeat(5001) })).toContain('5000')
   expect(metadataProblem({ title: 'Café 日本語 🐕', author: null })).toBeNull()
+  expect(metadataProblem({ title: '🐕'.repeat(5000) })).toBeNull()
+  expect(metadataProblem({ title: '🐕'.repeat(5001) })).toContain('5000')
+  for (const value of ['Null\0', '\u0001', '\uD800', '\uFFFF']) {
+    expect(metadataProblem({ title: value })).toContain('cannot be stored in XMP')
+  }
+  expect(metadataProblem({ title: 'Line\r\n\tbreaks' })).toBeNull()
 })
 
 it('sends only requested edits and remembers the opening password on the returned file', async () => {

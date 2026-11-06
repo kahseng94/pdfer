@@ -11,12 +11,12 @@ import { PdfToolPreview } from './PdfToolPreview'
 import { Button, DropOverlay, ErrorMessage, FIELD } from './ui'
 
 const inspect = (file: File, _doc: PDFDocumentProxy, signal: AbortSignal) => readMetadata(file, signal)
-const display = (value: string | null) => value === null ? 'Not present' : value === '' ? '(empty)' : value
+const display = (value: string | null, readable: boolean) => !readable ? 'Unavailable' : value === null ? 'Not present' : value === '' ? '(empty)' : value
 
 function StoredValues({ value }: { value: MetadataValue }) {
   return <dl className="grid gap-1 break-words text-xs text-zinc-500 sm:grid-cols-2">
-    <div><dt className="font-medium">XMP</dt><dd className="whitespace-pre-wrap">{display(value.xmp)}</dd></div>
-    <div><dt className="font-medium">DocumentInfo</dt><dd className="whitespace-pre-wrap">{display(value.documentInfo)}</dd></div>
+    <div><dt className="font-medium">XMP</dt><dd className="whitespace-pre-wrap">{display(value.xmp, value.xmpReadable)}</dd></div>
+    <div><dt className="font-medium">DocumentInfo</dt><dd className="whitespace-pre-wrap">{display(value.documentInfo, value.documentInfoReadable)}</dd></div>
   </dl>
 }
 
@@ -67,7 +67,7 @@ export function MetadataTool({ active = true }: { active?: boolean }) {
         <legend className="sr-only">Document metadata</legend>
         <div className="flex items-center justify-between gap-3"><h2 className="font-medium">Document metadata</h2><button type="button" onClick={reset} className="text-sm text-zinc-500 hover:underline">Reset changes</button></div>
         <p className="text-sm text-zinc-500">Keep original leaves both stored values unchanged. Edit updates XMP and DocumentInfo together; Clear field removes that property from both. Existing differences are shown below.</p>
-        <p className="text-xs text-zinc-500">Author edits store one author value. Title and subject edits keep other XMP language translations; clearing a field removes all its translations. Keywords edits affect PDF keywords; separate XMP keyword lists are preserved.</p>
+        <p className="text-xs text-zinc-500">Author edits store one author value. Title and subject edits also update language variants that match the old default; other translations are kept. Clearing a field removes all its translations. Keywords edits affect PDF keywords; separate XMP keyword lists are preserved.</p>
         {METADATA_FIELDS.map(({ id, label }) => {
           const value = schema.fields[id]
           const mode = metadataMode(changes, id)
@@ -80,7 +80,7 @@ export function MetadataTool({ active = true }: { active?: boolean }) {
                 change(next)
               }} className={`${FIELD} max-w-full py-1 text-sm`}><option value="keep">Keep original</option><option value="edit">Edit</option><option value="clear">Clear field</option></select>
             </div>
-            <textarea id={`metadata-${id}`} aria-label={label} rows={2} maxLength={5000} disabled={clearAll || !schema.canEdit || mode !== 'edit'} value={clearAll || mode === 'clear' ? '' : changes[id] ?? value.value ?? ''} onChange={(event) => change({ ...changes, [id]: event.target.value })} className={`${FIELD} block w-full px-3 py-2 disabled:opacity-60`} />
+            <textarea id={`metadata-${id}`} aria-label={label} rows={2} disabled={clearAll || !schema.canEdit || mode !== 'edit'} value={clearAll || mode === 'clear' ? '' : changes[id] ?? value.value ?? ''} onChange={(event) => change({ ...changes, [id]: event.target.value })} className={`${FIELD} block w-full px-3 py-2 disabled:opacity-60`} />
             {value.conflict && <p className="text-xs text-amber-700 dark:text-amber-400">Stored values differ. Choose Edit to use the displayed XMP value in both, or enter a new value.</p>}
             <StoredValues value={value} />
           </div>
