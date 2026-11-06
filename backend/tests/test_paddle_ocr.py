@@ -83,7 +83,8 @@ const page = await (await task.promise).getPage(1);
 console.log(JSON.stringify((await page.getTextContent()).items.filter(i=>'str' in i).map(i=>i.str).join('')));
 await task.destroy();
 """
-    output = subprocess.run(['node', '--input-type=module', '-e', script, reader.as_uri(), str(path)], capture_output=True, text=True, check=True)
+    output = subprocess.run(['node', '--input-type=module', '-e', script, reader.as_uri(), str(path)],
+                            capture_output=True, encoding='utf-8', timeout=30, check=True)
     assert json.loads(output.stdout.strip().splitlines()[-1]) == region()['text']
 
 
