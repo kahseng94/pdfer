@@ -112,9 +112,15 @@ it('bounds cumulative pixel work even when all pages are added', async () => {
   const page = { getViewport: () => ({ width: 2000, height: 2000 }), streamTextContent: () => textStream(), cleanup: vi.fn() }
   const empty = { numPages: 0, cleanup: async () => {} } as unknown as PDFDocumentProxy
   const doc = { numPages: 600, getPage: vi.fn(async () => page), cleanup: async () => {} } as unknown as PDFDocumentProxy
-  await expect(comparePdfs(empty, doc, DEFAULT_COMPARE, { signal: signal() })).rejects.toThrow('pixel budget')
-  expect(page.cleanup.mock.calls.length).toBeGreaterThan(400)
-  expect(page.cleanup.mock.calls.length).toBeLessThan(600)
+  // This checks the work limit, not the OS timer resolution of hundreds of yields.
+  vi.useFakeTimers()
+  try {
+    const limited = expect(comparePdfs(empty, doc, DEFAULT_COMPARE, { signal: signal() })).rejects.toThrow('pixel budget')
+    await vi.runAllTimersAsync()
+    await limited
+    expect(page.cleanup.mock.calls.length).toBeGreaterThan(400)
+    expect(page.cleanup.mock.calls.length).toBeLessThan(600)
+  } finally { vi.useRealTimers() }
 })
 
 it('cancels pending text reads without waiting for the worker to acknowledge cancellation', async () => {
