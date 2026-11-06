@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
   boxBetween,
+  boxesOverlap,
   bounds,
+  clampPoint,
+  constrainBox,
+  copyRegionToPage,
   imagePlacement,
   moved,
   normalizeText,
   resized,
+  regionOnPage,
+  rotateRegion,
   toPayload,
   type DrawElement,
   type ImageElement,
   type LineElement,
+  type RegionElement,
   type ShapeElement,
   type TextElement,
 } from './edits'
@@ -17,6 +24,87 @@ import {
 const line: LineElement = { id: 'l', page: 1, type: 'line', x1: 10, y1: 30, x2: 50, y2: 20, stroke: '#000000', strokeWidth: 4 }
 const draw: DrawElement = { id: 'd', page: 1, type: 'draw', points: [[5, 5], [8, 1], [2, 9]], stroke: '#000000', strokeWidth: 2 }
 const rect: ShapeElement = { id: 'r', page: 2, type: 'rect', x: 1, y: 2, width: 30, height: 20, stroke: '#ff0000', strokeWidth: 2, fill: null }
+const region: RegionElement = { id: 'region', type: 'region', page: 1, sourcePage: 1, x: 100.123, y: 200.456, width: 40, height: 20, source: { x: 10.123, y: 30.456, width: 80, height: 40 } }
+
+describe('regions', () => {
+  it('rotates about the center, swaps visible dimensions, and preserves the source', () => {
+    const original: RegionElement = { ...region, x: 50, y: 60, width: 120, height: 40 }
+    const page = { width: 300, height: 400 }
+    const right = rotateRegion(original, 90, page)
+    expect(right).toMatchObject({ rotation: 90, x: 90, y: 20, width: 40, height: 120, source: original.source, sourcePage: 1 })
+    const upsideDown = rotateRegion(right, 180, page)
+    expect(upsideDown).toMatchObject({ rotation: 180, x: 50, y: 60, width: 120, height: 40 })
+    expect(rotateRegion(rotateRegion(upsideDown, 270, page), 0, page)).toMatchObject({ rotation: 0, x: 50, y: 60, width: 120, height: 40 })
+    expect(original.rotation).toBeUndefined()
+    expect(toPayload([right]).edits[0]).toMatchObject({ rotation: 90, width: 40, height: 120 })
+  })
+
+  it('fits rotated regions inside the page and carries rotation to independent copies', () => {
+    const rotated = rotateRegion({ ...region, x: 0, y: 0, width: 300, height: 400 }, 90, { width: 300, height: 400 })
+    expect(rotated).toMatchObject({ rotation: 90, x: 0, y: 87.5, width: 300, height: 225 })
+    const copy = copyRegionToPage(rotated, 'turned-copy', 2, { width: 200, height: 300 })
+    expect(copy).toMatchObject({ copy: true, rotation: 90, source: region.source, sourcePage: 1, width: 200, height: 150 })
+  })
+
+  it('offsets a same-page copy without changing the original or its source', () => {
+    const copy = copyRegionToPage(region, 'same-page-copy', 1, { width: 300, height: 400 })
+    expect(copy).toMatchObject({ id: 'same-page-copy', page: 1, sourcePage: 1, copy: true, width: 40, height: 20, source: region.source })
+    expect(copy.x).toBeCloseTo(region.x + 12)
+    expect(copy.y).toBeCloseTo(region.y + 12)
+    expect(region).toMatchObject({ x: 100.123, y: 200.456 })
+  })
+
+  it('offsets inward at the page edges and keeps nearly full-page copies inside', () => {
+    const page = { width: 300, height: 400 }
+    expect(copyRegionToPage({ ...region, x: 260, y: 380 }, 'edge-copy', 1, page)).toMatchObject({ x: 248, y: 368, width: 40, height: 20 })
+    expect(copyRegionToPage({ ...region, x: 1, y: 2, width: 298, height: 397 }, 'wide-copy', 1, page)).toMatchObject({ x: 2, y: 0, width: 298, height: 397 })
+    expect(copyRegionToPage({ ...region, x: 0, y: 0, ...page }, 'full-copy', 1, page)).toMatchObject({ x: 0, y: 0, ...page, copy: true })
+  })
+
+  it('makes an independent copy, preserves the selected region, and fits the target page', () => {
+    const original = structuredClone(region)
+    const copy = copyRegionToPage(region, 'copy', 2, { width: 30, height: 50 })
+    expect(copy).toMatchObject({ id: 'copy', copy: true, page: 2, sourcePage: 1, source: region.source, x: 0, y: 35, width: 30, height: 15 })
+    expect(region).toEqual(original)
+    const another = copyRegionToPage(copy, 'copy-again', 1, { width: 300, height: 400 })
+    expect(another).toMatchObject({ id: 'copy-again', copy: true, page: 1, sourcePage: 1, source: region.source, width: 30, height: 15 })
+    expect(toPayload([copy]).edits[0]).toMatchObject({ copy: true, page: 2, sourcePage: 1, source: { x: 10.12, y: 30.46, width: 80, height: 40 } })
+  })
+  it('serializes deleted regions as masks while keeping their original source and former destination', () => {
+    expect(toPayload([{ ...region, page: 2, deleted: true }])).toEqual({ images: [], edits: [{
+      type: 'region', page: 2, sourcePage: 1, deleted: true, x: 100.12, y: 200.46, width: 40, height: 20,
+      source: { x: 10.12, y: 30.46, width: 80, height: 40 },
+    }] })
+  })
+  it('moves and resizes the destination without changing the original selection', () => {
+    const next = moved(region, 10, 20)
+    expect(next.source).toEqual(region.source)
+    expect(bounds(next)).toEqual({ x: 110.123, y: 220.456, width: 40, height: 20 })
+    expect(toPayload([next])).toEqual({ images: [], edits: [{ type: 'region', page: 1, sourcePage: 1, x: 110.12, y: 220.46, width: 40, height: 20, source: { x: 10.12, y: 30.46, width: 80, height: 40 } }] })
+  })
+
+  it('changes destination pages while preserving the source and fitting proportionally', () => {
+    const next = regionOnPage(region, 2, { width: 30, height: 50 })
+    expect(next).toMatchObject({ page: 2, sourcePage: 1, source: region.source, x: 0, y: 35, width: 30, height: 15 })
+    const back = regionOnPage(next, 1, { width: 300, height: 400 })
+    expect(back).toMatchObject({ page: 1, sourcePage: 1, source: region.source, width: 30, height: 15 })
+    expect(toPayload([next]).edits[0]).toMatchObject({ page: 2, sourcePage: 1 })
+  })
+
+  it('keeps a region within the page and preserves aspect ratio at its limits', () => {
+    const page = { width: 300, height: 400 }
+    expect(clampPoint([-20, 500], page)).toEqual([0, 400])
+    expect(constrainBox({ x: -10, y: 390, width: 40, height: 20 }, page)).toEqual({ x: 0, y: 380, width: 40, height: 20 })
+    expect(constrainBox({ x: -50, y: -20, width: 600, height: 200 }, page, true)).toEqual({ x: 0, y: 0, width: 300, height: 100 })
+  })
+
+  it('allows adjacent selections but detects intersecting sources', () => {
+    const a = { x: 0, y: 0, width: 10, height: 20 }
+    expect(boxesOverlap(a, { ...a, x: 10 })).toBe(false)
+    expect(boxesOverlap(a, { ...a, x: 9 })).toBe(true)
+    expect(boxesOverlap(a, { x: 2, y: 2, width: 2, height: 2 })).toBe(true)
+  })
+})
 
 describe('bounds', () => {
   it('pads lines and strokes by half their width', () => {

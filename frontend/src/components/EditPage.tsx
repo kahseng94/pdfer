@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import {
   bounds,
   boxBetween,
+  boxesOverlap,
+  clampPoint,
+  constrainBox,
   distance,
   HANDLES,
   lineWidth,
@@ -9,6 +12,7 @@ import {
   moved,
   normalizeText,
   resized,
+  roundedBox,
   TEXT_ASCENT,
   TEXT_LINE_HEIGHT,
   textareaTop,
@@ -21,6 +25,7 @@ import {
   type Handle,
   type LineElement,
   type Point,
+  type RegionElement,
   type Style,
   type TextElement,
   type Tool,
@@ -28,6 +33,7 @@ import {
 import { familyCss } from '../lib/fonts'
 import type { PDFDocumentProxy } from '../lib/pdf'
 import { PageThumbnail } from './PageThumbnail'
+import { RegionPreview } from './RegionPreview'
 
 export type PageSize = { width: number; height: number }
 
@@ -45,6 +51,10 @@ export type Editor = {
   commit: (update: (elements: Element[]) => Element[]) => void
   /** One-shot tools go back to Select after use. */
   toolDone: () => void
+  /** Resolve a region drag against all displayed pages, using a fractional grab point. */
+  placeRegion?: (original: RegionElement, client: Point, grab: Point, fallbackPage: number) => RegionElement
+  /** Scroll the viewport during a held drag; return whether it actually moved. */
+  scrollRegionDrag?: (client: Point, elapsedMs: number) => boolean
 }
 
 type Props = {
@@ -56,6 +66,8 @@ type Props = {
   zoom: number
   /** This page's elements, in drawing order. */
   elements: Element[]
+  /** Regions cut from this page, including ones now placed on other pages. */
+  sourceRegions?: RegionElement[]
   selectedId: string | null
   editingId: string | null
   tool: Tool
@@ -65,7 +77,8 @@ type Props = {
 }
 
 type Drag =
-  | { kind: 'move'; id: string; orig: Element; start: Point; moved: boolean }
+  | { kind: 'region'; start: Point }
+  | { kind: 'move'; id: string; orig: Element; start: Point; moved: boolean; client: Point; startClient: Point; grab: Point; currentPage: number; lastRegion?: RegionElement }
   | { kind: 'resize'; id: string; orig: BoxElement; handle: Handle; start: Point; moved: boolean }
   | { kind: 'endpoint'; id: string; handle: 'p1' | 'p2'; moved: boolean }
   | { kind: 'box'; id: string; start: Point }
@@ -76,6 +89,7 @@ type Draft = { id: string; text: string }
 
 const CURSORS: Record<Tool, string> = {
   select: 'default',
+  region: 'crosshair',
   text: 'text',
   highlight: 'crosshair',
   rect: 'crosshair',
@@ -85,9 +99,25 @@ const CURSORS: Record<Tool, string> = {
 }
 
 /** One page with its elements drawn over it, where they can be added, moved and resized. */
-export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, editingId, tool, style, editor, lockImageAspect = false }: Props) {
+export function EditPage({ doc, pageNumber, size, zoom, elements, sourceRegions, selectedId, editingId, tool, style, editor, lockImageAspect = false }: Props) {
   const svg = useRef<SVGSVGElement>(null)
   const drag = useRef<Drag | null>(null)
+  const scrollFrame = useRef<number | null>(null)
+  useEffect(() => () => { if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current) }, [])
+  const [regionDraft, setRegionDraft] = useState<Box | null>(null)
+  const [regionError, setRegionError] = useState<string | null>(null)
+  const regions = sourceRegions ?? elements.filter((el): el is RegionElement => el.type === 'region' && !el.copy && el.sourcePage === pageNumber)
+  const choosingRegion = tool === 'region'
+  useEffect(() => {
+    // Tool changes must cancel an in-flight pointer selection, including its overlay.
+    // oxlint-disable react/set-state-in-effect
+    if (tool !== 'region' && drag.current?.kind === 'region') {
+      drag.current = null
+      setRegionDraft(null)
+    }
+    setRegionError(null)
+    // oxlint-enable react/set-state-in-effect
+  }, [tool])
   // A text element created by the Text tool is only kept once it has words in it.
   const newText = useRef<string | null>(null)
   // The last element clicked and when: a second click soon after opens text for editing.
@@ -100,7 +130,7 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
     setDraftState(next)
   }
 
-  const selected = elements.find((el) => el.id === selectedId) ?? null
+  const selected = elements.find((el) => el.id === selectedId && !(el.type === 'region' && el.deleted)) ?? null
   const editingEl = elements.find((el) => el.id === editingId)
   const editing = editingEl?.type === 'text' ? editingEl : null
 
@@ -144,12 +174,20 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
     e.preventDefault()
     // Clicking the page while typing finishes the text first.
     if (editing) finishEditing()
-    const p = toPoint(e)
+    // Leave numeric/page controls so arrow keys nudge the canvas selection.
+    // Text editing handles its own focus and blur lifecycle.
+    if (!editing && tool !== 'text') e.currentTarget.focus({ preventScroll: true })
+    const p = choosingRegion ? clampPoint(toPoint(e), size) : toPoint(e)
     const target = e.target as SVGElement
     const common = { id: crypto.randomUUID(), page: pageNumber }
     let next: Drag | null = null
 
-    if (tool === 'select') {
+    if (tool === 'region') {
+      setRegionError(null)
+      editor.select(null)
+      setRegionDraft({ x: p[0], y: p[1], width: 0, height: 0 })
+      next = { kind: 'region', start: p }
+    } else if (tool === 'select') {
       const handle = target.closest('[data-handle]')?.getAttribute('data-handle')
       if (handle && selected) {
         editor.begin()
@@ -171,7 +209,9 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
             return
           }
           editor.begin()
-          next = { kind: 'move', id: hit.id, orig: hit, start: p, moved: false }
+          next = { kind: 'move', id: hit.id, orig: hit, start: p, moved: false,
+            client: [e.clientX, e.clientY], startClient: [e.clientX, e.clientY], currentPage: pageNumber,
+            grab: hit.type === 'region' ? [(p[0] - hit.x) / hit.width, (p[1] - hit.y) / hit.height] : [0, 0] }
         }
       }
     } else if (tool === 'text') {
@@ -216,25 +256,72 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
     }
   }
 
+  function placeMovingRegion(d: Extract<Drag, { kind: 'move' }>) {
+    if (d.orig.type !== 'region' || !editor.placeRegion) return
+    const next = editor.placeRegion(d.orig, d.client, d.grab, d.currentPage)
+    const last = d.lastRegion ?? d.orig
+    d.currentPage = next.page
+    d.lastRegion = next
+    if (next.page !== last.page || next.x !== last.x || next.y !== last.y || next.width !== last.width || next.height !== last.height) {
+      update(d.id, () => next)
+    }
+  }
+
+  function stopAutoScroll() {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current)
+    scrollFrame.current = null
+  }
+
+  function startAutoScroll() {
+    if (scrollFrame.current !== null || !editor.scrollRegionDrag) return
+    let previous: number | null = null
+    const tick = (time: number) => {
+      scrollFrame.current = null
+      const d = drag.current
+      if (d?.kind !== 'move' || d.orig.type !== 'region' || !d.moved) return
+      const elapsed = previous === null ? 16 : time - previous
+      previous = time
+      if (editor.scrollRegionDrag?.(d.client, elapsed)) {
+        placeMovingRegion(d)
+        scrollFrame.current = requestAnimationFrame(tick)
+      }
+    }
+    scrollFrame.current = requestAnimationFrame(tick)
+  }
+
   function onPointerMove(e: ReactPointerEvent<SVGSVGElement>) {
     const d = drag.current
     if (!d) return
     const p = toPoint(e)
     switch (d.kind) {
+      case 'region':
+        setRegionDraft(boxBetween(d.start, clampPoint(p, size)))
+        break
       case 'move': {
+        if (d.orig.type === 'region' && editor.placeRegion) {
+          d.client = [e.clientX, e.clientY]
+          if (!d.moved && distance(d.startClient, d.client) < 1) return
+          d.moved = true
+          placeMovingRegion(d)
+          startAutoScroll()
+          break
+        }
         const dx = p[0] - d.start[0]
         const dy = p[1] - d.start[1]
         if (!d.moved && Math.hypot(dx, dy) < 1) return
         d.moved = true
-        update(d.id, () => moved(d.orig, dx, dy))
+        update(d.id, () => {
+          const next = moved(d.orig, dx, dy)
+          return next.type === 'region' ? withBox(next, constrainBox(next, size)) : next
+        })
         break
       }
       case 'resize': {
         d.moved = true
         // Pictures keep their shape unless Shift is held; shapes are the other way round.
-        const keepAspect = d.orig.type === 'image' ? lockImageAspect || !e.shiftKey : e.shiftKey
+        const keepAspect = d.orig.type === 'region' ? !e.shiftKey : d.orig.type === 'image' ? lockImageAspect || !e.shiftKey : e.shiftKey
         const box = resized(bounds(d.orig), d.handle, p[0] - d.start[0], p[1] - d.start[1], keepAspect)
-        update(d.id, (el) => withBox(el as BoxElement, box))
+        update(d.id, (el) => withBox(el as BoxElement, d.orig.type === 'region' ? constrainBox(box, size, keepAspect) : box))
         break
       }
       case 'endpoint':
@@ -259,12 +346,33 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
   }
 
   function onPointerUp(e: ReactPointerEvent<SVGSVGElement>) {
+    stopAutoScroll()
     const d = drag.current
     if (!d) return
     drag.current = null
     const p = toPoint(e)
     switch (d.kind) {
+      case 'region': {
+        setRegionDraft(null)
+        const box = roundedBox(boxBetween(d.start, clampPoint(p, size)))
+        if (box.width < MIN_SIZE || box.height < MIN_SIZE) break
+        if (regions.some((el) => boxesOverlap(el.source, box))) {
+          setRegionError('That overlaps an existing source region. Select a separate area of the original page.')
+          break
+        }
+        const id = crypto.randomUUID()
+        editor.commit((els) => [...els, { id, page: pageNumber, sourcePage: pageNumber, type: 'region', source: box, ...box }])
+        editor.select(id)
+        editor.toolDone()
+        break
+      }
       case 'move':
+        if (d.moved && d.orig.type === 'region' && editor.placeRegion) {
+          d.client = [e.clientX, e.clientY]
+          placeMovingRegion(d)
+        }
+        editor.end(d.moved)
+        break
       case 'resize':
       case 'endpoint':
         editor.end(d.moved)
@@ -295,6 +403,15 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
     }
   }
 
+  function cancelDrag() {
+    stopAutoScroll()
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    if (d.kind === 'region') setRegionDraft(null)
+    else editor.end(false)
+  }
+
   const width = size.width * zoom
   const height = size.height * zoom
   const interactive = tool === 'select'
@@ -310,11 +427,33 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerCancel={cancelDrag}
+        onLostPointerCapture={cancelDrag}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && drag.current) {
+            event.preventDefault()
+            event.stopPropagation()
+            cancelDrag()
+          }
+        }}
+        aria-label={`Edit page ${pageNumber}`}
+        data-editor-page={pageNumber}
+        tabIndex={0}
       >
-        {elements.map((el) => (el.id === editing?.id ? null : render(el, zoom, interactive)))}
-        {selected && selected.id !== editing?.id && <Selection el={selected} zoom={zoom} cornersOnly={lockImageAspect && selected.type === 'image'} />}
+        {choosingRegion ? (
+          <>
+            {regions.map((el) => <rect key={el.id} {...el.source} fill="#e11d48" fillOpacity={0.15} stroke="#e11d48" strokeWidth={1 / zoom} pointerEvents="none" />)}
+            {regionDraft && <rect {...regionDraft} fill="#e11d48" fillOpacity={0.1} stroke="#e11d48" strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} pointerEvents="none" />}
+          </>
+        ) : (
+          <>
+            {regions.map((el) => <rect key={el.id} data-region-source={el.id} {...el.source} fill="white" pointerEvents="none" />)}
+            {elements.map((el) => (el.id === editing?.id ? null : render(el, zoom, interactive, doc)))}
+            {selected && selected.id !== editing?.id && <Selection el={selected} zoom={zoom} cornersOnly={selected.type === 'region' || (lockImageAspect && selected.type === 'image')} />}
+          </>
+        )}
       </svg>
+      {regionError && <p role="alert" className="absolute inset-x-2 bottom-2 rounded bg-rose-50 p-3 text-sm text-rose-800 shadow">{regionError}</p>}
       {editing && (
         <TextEditor
           key={editing.id}
@@ -329,12 +468,20 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, selectedId, ed
   )
 }
 
-function render(el: Element, zoom: number, interactive: boolean): ReactNode {
+function render(el: Element, zoom: number, interactive: boolean, doc: PDFDocumentProxy): ReactNode {
   const className = interactive ? 'cursor-move' : undefined
   // Thin strokes are hard to hit, so an invisible wider twin takes the clicks.
   const hitWidth = (strokeWidth: number) => Math.max(strokeWidth, 10 / zoom)
 
   switch (el.type) {
+    case 'region':
+      if (el.deleted) return null
+      return (
+        <g key={el.id} data-id={el.id} className={className}>
+          <RegionPreview region={el} doc={doc} zoom={zoom} />
+          <rect x={el.x} y={el.y} width={el.width} height={el.height} fill="transparent" />
+        </g>
+      )
     case 'text': {
       const box = textBox(el)
       return (
@@ -465,7 +612,7 @@ function Selection({ el, zoom, cornersOnly = false }: { el: Element; zoom: numbe
             ['p2', el.x2, el.y2],
           ] as const
         ).map(([h, cx, cy]) => <circle key={h} data-handle={h} cx={cx} cy={cy} r={s / 2} className="cursor-move" {...handleProps} />)}
-      {(el.type === 'image' || el.type === 'rect' || el.type === 'ellipse' || el.type === 'highlight') &&
+      {(el.type === 'region' || el.type === 'image' || el.type === 'rect' || el.type === 'ellipse' || el.type === 'highlight') &&
         HANDLES.filter((h) => !cornersOnly || h.length === 2).map((h) => {
           const [cx, cy] = handleCentre(b, h)
           return (

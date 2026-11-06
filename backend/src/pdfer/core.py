@@ -824,6 +824,32 @@ class ImageEdit(_Edit):
 
 
 @dataclass(frozen=True, kw_only=True)
+class RegionEdit(_Edit):
+    """Move, copy or visually delete original content, in physical display points.
+
+    The source is covered with white, not securely removed. The destination
+    uses a clipped form XObject, so text and vector graphics remain sharp.
+    Deleted regions keep only the source mask, with no destination cutout.
+    Copies place a cutout without covering the source.
+    """
+
+    source: tuple[float, float, float, float]  # left, top, width, height
+    x: float
+    y: float
+    width: float
+    height: float
+    source_page: int | None = None
+    rotation: int = 0  # clockwise; width/height are the rotated visible box
+    copy: bool = False
+    deleted: bool = False
+
+    @property
+    def origin_page(self) -> int:
+        # Older clients used page for both ends of a same-page move.
+        return self.page if self.source_page is None else self.source_page
+
+
+@dataclass(frozen=True, kw_only=True)
 class ShapeEdit(_Edit):
     shape: Literal["rect", "ellipse"]
     x: float
@@ -865,7 +891,7 @@ class DrawEdit(_Edit):
     stroke_width: float
 
 
-Edit = TextEdit | ImageEdit | ShapeEdit | HighlightEdit | LineEdit | DrawEdit | _TextStamp
+Edit = TextEdit | ImageEdit | RegionEdit | ShapeEdit | HighlightEdit | LineEdit | DrawEdit | _TextStamp
 
 _MAX_COORD = 100_000
 _MAX_TEXT = 5_000
@@ -899,10 +925,10 @@ class _Fields:
             raise PdfToolError(f'{self.label}: "{key}" must be more than 0.')
         return v
 
-    def page(self, total: int) -> int:
-        v = self.item.get("page")
+    def page(self, total: int, key: str = "page") -> int:
+        v = self.item.get(key)
         if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= total:
-            raise PdfToolError(f'{self.label}: "page" is outside pages 1-{total}.')
+            raise PdfToolError(f'{self.label}: "{key}" is outside pages 1-{total}.')
         return v
 
     def text(self, key: str, max_len: int) -> str:
@@ -954,7 +980,13 @@ class _Fields:
         return tuple((float(p[0]), float(p[1])) for p in v)
 
 
-_KINDS = ("text", "image", "rect", "ellipse", "highlight", "line", "draw")
+_KINDS = ("text", "image", "region", "rect", "ellipse", "highlight", "line", "draw")
+
+
+def _region_rotation(value: object) -> int:
+    if isinstance(value, bool) or value not in (0, 90, 180, 270):
+        raise PdfToolError("Region rotation must be 0, 90, 180 or 270 degrees.")
+    return int(value)  # type: ignore[arg-type]
 
 
 def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
@@ -1002,6 +1034,17 @@ def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
                     page=page, x=f.num("x"), y=f.num("y"), width=f.length("width"), height=f.length("height"), image=index
                 )
             )
+        elif kind == "region":
+            source = _Fields(f._raw("source"), f"{f.label} source")
+            edits.append(RegionEdit(
+                page=page,
+                source_page=f.page(total, "sourcePage") if "sourcePage" in f.item else page,
+                rotation=_region_rotation(f.item.get("rotation", 0)),
+                copy=f.flag("copy"),
+                deleted=f.flag("deleted"),
+                source=(source.num("x", 0), source.num("y", 0), source.num("width", 2), source.num("height", 2)),
+                x=f.num("x", 0), y=f.num("y", 0), width=f.num("width", 2), height=f.num("height", 2),
+            ))
         elif kind in ("rect", "ellipse"):
             stroke = f.color("stroke", optional=True)
             fill = f.color("fill", optional=True)
@@ -1056,27 +1099,50 @@ def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
 
 
 def edit(data: bytes, edits: Sequence[Edit], images: Sequence[tuple[str, bytes]] = (), name: str = "file", password: str = "") -> bytes:
-    """Draw the edits on top of their pages. Each image is (display name, bytes).
+    """Draw edits and move regions. Each image is (display name, bytes).
 
-    Everything already on a page stays exactly as it is; the edits go on
-    after it, so they sit above the existing content.
+    Regions always sample the original page, before any edits. All vacated
+    areas are covered first, then edits are drawn in their listed order.
     """
     if not edits:
         raise PdfToolError("Add at least one edit.")
+    if sum(isinstance(e, RegionEdit) for e in edits) > 200:
+        raise PdfToolError("Use at most 200 regions at a time.")
 
     with _open(data, name, password) as pdf:
         total = len(pdf.pages)
         by_page: dict[int, list[Edit]] = {}
+        by_source: dict[int, list[RegionEdit]] = {}
         for e in edits:
             if not 1 <= e.page <= total:
                 raise PdfToolError(f"Page {e.page} is outside pages 1-{total}.")
             if isinstance(e, ImageEdit) and not 0 <= e.image < len(images):
                 raise PdfToolError("An edit refers to an image that wasn't provided.")
+            if isinstance(e, RegionEdit):
+                _region_rotation(e.rotation)
+                if e.copy and e.deleted:
+                    raise PdfToolError("To delete a copied region, remove its edit instead of marking its source deleted.")
+                if isinstance(e.origin_page, bool) or not isinstance(e.origin_page, int) or not 1 <= e.origin_page <= total:
+                    raise PdfToolError(f"Source page {e.origin_page} is outside pages 1-{total}.")
+                by_source.setdefault(e.origin_page, []).append(e)
+                if e.deleted:
+                    continue  # Keep only the source mask; the destination is untouched.
             by_page.setdefault(e.page, []).append(e)
 
         painter = _Painter(pdf, images)
+        for page_no, regions in by_source.items():
+            _region_boxes(pdf.pages[page_no - 1], regions, source=True)
         for page_no, page_edits in by_page.items():
-            painter.paint(pdf.pages[page_no - 1], page_edits)
+            _region_boxes(pdf.pages[page_no - 1], [e for e in page_edits if isinstance(e, RegionEdit)], source=False)
+        # Capture every source before painting any page, including when two
+        # pages exchange regions or a source page also has ordinary overlays.
+        painter.region_sources = {
+            number: _region_original(pdf, pdf.pages[number - 1])
+            for number, regions in by_source.items() if any(not region.deleted for region in regions)
+        }
+        vacated = {number: [region for region in regions if not region.copy] for number, regions in by_source.items()}
+        for page_no in dict.fromkeys([*by_page, *(number for number, regions in vacated.items() if regions)]):
+            painter.paint(pdf.pages[page_no - 1], by_page.get(page_no, []), vacated=vacated.get(page_no, []))
         painter.finish()
         return _save(pdf, password if pdf.is_encrypted else "", min_version="1.4" if images else "1.3")
 
@@ -1303,8 +1369,8 @@ _KAPPA = 0.5522847498  # Bézier control distance that best approximates a quart
 Instruction = tuple[list[object], pikepdf.Operator]
 
 
-def _op(operator: str, *operands: object) -> Instruction:
-    return [round(v, 3) if isinstance(v, float) else v for v in operands], pikepdf.Operator(operator)
+def _op(operator: str, *operands: object, precision: int = 3) -> Instruction:
+    return [round(v, precision) if isinstance(v, float) else v for v in operands], pikepdf.Operator(operator)
 
 
 def _ellipse(cx: float, cy: float, rx: float, ry: float) -> list[Instruction]:
@@ -1351,6 +1417,60 @@ class _Embedded:
         self.chars: set[str] = set()
 
 
+def _region_unit(page: pikepdf.Page) -> float:
+    try:
+        unit = float(page.get("/UserUnit", 1))
+    except (TypeError, ValueError):
+        unit = 1
+    if not math.isfinite(unit) or unit <= 0:
+        unit = 1
+    return unit
+
+
+def _region_boxes(page: pikepdf.Page, regions: Sequence[RegionEdit], *, source: bool) -> None:
+    """Check each end in its own page's display frame and physical units."""
+    if not regions:
+        return
+    frame, width, height = _display_frame(page)
+    unit = _region_unit(page)
+    boxes = []
+    matrix = pikepdf.Matrix(*frame)
+    number = page.index + 1
+    label = "source" if source else "destination"
+    for region in regions:
+        box = region.source if source else (region.x, region.y, region.width, region.height)
+        x, y, w, h = box
+        if (not all(math.isfinite(v) for v in box) or min(x, y) < 0 or min(w, h) < 2
+                or x + w > width * unit + 0.02 or y + h > height * unit + 0.02):
+            raise PdfToolError(f"Region {label} must fit inside page {number} and be at least 2 points wide and high.")
+        native = matrix.transform(pikepdf.Rectangle(x / unit, height - (y + h) / unit, (x + w) / unit, height - y / unit))
+        for annotation in page.get("/Annots", []):
+            rect = _box(annotation.get("/Rect"))
+            if rect is None or (rect[0] < native.urx and rect[2] > native.llx and rect[1] < native.ury and rect[3] > native.lly):
+                raise PdfToolError(f"A region on page {number} touches a link, annotation or form field. Choose an area away from these objects.")
+        if source and not region.copy:
+            if any(x < sx + sw and x + w > sx and y < sy + sh and y + h > sy for sx, sy, sw, sh in boxes):
+                raise PdfToolError(f"Source regions on page {number} overlap. Select separate areas of the original page.")
+            boxes.append(box)
+
+
+def _region_original(pdf: pikepdf.Pdf, page: pikepdf.Page) -> pikepdf.Object:
+    """Freeze content and resources before adding masks or new XObjects."""
+    original = page.as_form_xobject(handle_transformations=False)
+    form = pdf.make_stream(original.read_bytes())
+    for key, value in original.items():
+        if key not in ("/Length", "/Filter", "/DecodeParms"):
+            form[key] = value
+    # Resource subdictionaries may be shared with the page. Detach them so
+    # adding this form to the page cannot make the form refer to itself.
+    resources = pikepdf.Dictionary(original.get("/Resources", pikepdf.Dictionary()))
+    for key, value in list(resources.items()):
+        if isinstance(value, pikepdf.Dictionary):
+            resources[key] = pikepdf.Dictionary(value)
+    form.Resources = resources
+    return form
+
+
 class _Painter:
     """Draws edits onto pages, sharing fonts, images and graphics states between them."""
 
@@ -1362,19 +1482,56 @@ class _Painter:
         self.pictures: dict[int, pikepdf.Object] = {}
         self.multiply: pikepdf.Object | None = None
         self.opacities: dict[float, pikepdf.Object] = {}
+        self.region_sources: dict[int, pikepdf.Object] = {}
         # Resource names are per page, so remember what each page calls each object.
         self.names: dict[tuple[int, str], pikepdf.Name] = {}
 
-    def paint(self, page: pikepdf.Page, edits: Sequence[Edit]) -> None:
+    def paint(self, page: pikepdf.Page, edits: Sequence[Edit], *, vacated: Sequence[RegionEdit] = ()) -> None:
         matrix, _, height = _display_frame(page)
         ops: list[Instruction] = [_op("q"), _op("cm", *matrix)]
+        regions = [e for e in edits if isinstance(e, RegionEdit)]
+        unit = _region_unit(page) if regions or vacated else 1.0
+        if vacated:
+            ops += [_op("q"), _op("rg", 1, 1, 1)]
+            for region in vacated:
+                x, y, width, h = region.source
+                ops += [_op("re", x / unit, height - (y + h) / unit, width / unit, h / unit, precision=9), _op("f")]
+            ops.append(_op("Q"))
         for e in edits:
+            # A sampled page may rely on the default graphics state. Do not
+            # let earlier added text/shapes change its colors or line styles.
+            if regions:
+                ops.append(_op("q"))
             if isinstance(e, _TextStamp):
                 ops += self._stamp(page, e, height)
             elif isinstance(e, TextEdit):
                 ops += self._text(page, e, height)
             elif isinstance(e, ImageEdit):
                 ops += self._image(page, e, height)
+            elif isinstance(e, RegionEdit):
+                origin = self.pdf.pages[e.origin_page - 1]
+                source_matrix, _, source_height = _display_frame(origin)
+                source_unit = _region_unit(origin)
+                original_name = self._resource(page, f"region-original:{e.origin_page}", self.region_sources[e.origin_page], pikepdf.Name.XObject, "Region")
+                sx, sy, sw, sh = (v / source_unit for v in e.source)
+                x, y, w, h = (v / unit for v in (e.x, e.y, e.width, e.height))
+                source_bottom = source_height - sy - sh
+                inverse = pikepdf.Matrix(*source_matrix).inverse()
+                # Rotate within the destination box in the displayed frame.
+                # PDF y points upward, so clockwise 90 degrees has negative b.
+                a, b, c, d, ox, oy = {
+                    0: (w / sw, 0, 0, h / sh, 0, 0),
+                    90: (0, -h / sw, w / sh, 0, 0, h),
+                    180: (-w / sw, 0, 0, -h / sh, w, h),
+                    270: (0, h / sw, -w / sh, 0, w, 0),
+                }[e.rotation]
+                ops += [
+                    _op("q"),
+                    _op("cm", a, b, c, d, x + ox - a * sx - c * source_bottom, height - y - h + oy - b * sx - d * source_bottom, precision=9),
+                    _op("re", sx, source_bottom, sw, sh, precision=9), _op("W"), _op("n"),
+                    _op("q"), _op("rg", 1, 1, 1), _op("re", sx, source_bottom, sw, sh, precision=9), _op("f"), _op("Q"),
+                    _op("cm", *inverse.shorthand), _op("Do", original_name), _op("Q"),
+                ]
             elif isinstance(e, ShapeEdit):
                 ops += self._shape(e, height)
             elif isinstance(e, HighlightEdit):
@@ -1383,6 +1540,8 @@ class _Painter:
                 ops += self._stroke([(e.x1, e.y1), (e.x2, e.y2)], e.stroke, e.stroke_width, height)
             else:
                 ops += self._stroke(e.points, e.stroke, e.stroke_width, height)
+            if regions:
+                ops.append(_op("Q"))
         ops.append(_op("Q"))
         # Wrap what is already there so its graphics state can't leak into the edits.
         page.contents_add(b"q\n", prepend=True)

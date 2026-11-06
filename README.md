@@ -32,7 +32,7 @@ the PDF. Further changes update that same project. Open **Saved projects** above
 the tool tabs to resume after refreshing the page or restarting pdfer. The source
 PDF is included, so you do not need to find or upload it again.
 
-Projects keep text, drawings, highlights and placed images in Edit; page order,
+Projects keep text, drawings, highlights, placed images and moved regions in Edit; page order,
 duplicates, removals, rotations, crop/resize settings and selections in Organize;
 and signature images, sizes, positions and page assignments in Signatures.
 Placed images are independent copies, so deleting a signature from the library
@@ -67,6 +67,75 @@ as a new project to avoid overwriting that version.
 Original protected PDFs remain encrypted, and their passwords are never saved.
 Resuming them asks for the password again. Project names, unfinished edits and
 placed images are stored locally without additional encryption.
+
+### Move existing PDF content
+
+In **Edit**, choose **Move region** and drag a rectangle around the part of the
+original page to move. The editor returns to **Select**: drag the selected block
+to another position, or choose **Move to page** to move it to a different
+page in the PDF. The editor scrolls to that page and keeps the region selected.
+You can also drag the selected region directly onto another displayed page.
+Hold it near the top or bottom of the editing area to scroll while dragging.
+The grabbed point stays under the pointer when the region fits a smaller page.
+Releasing between pages keeps it inside the last page reached; Escape cancels
+the drag. A whole drag, including crossing pages, is one undo step.
+The source page stays fixed, even if you change the destination again.
+Regions that are too large for a smaller page shrink proportionally to fit.
+Drag a corner to resize it. Corners
+preserve its proportions; hold Shift to stretch. **Left**, **Top**, **Width** and
+**Height** give precise control in points. Arrow keys nudge the selected region
+by one point, or ten with Shift. Selections and destinations stay inside the page.
+
+Use **Rotate region left/right** to turn a selected region by 90 degrees, or
+choose **0°, 90°, 180° or 270°** under **Rotation**. Rotation is clockwise from
+the original crop's orientation. The region stays centered where possible;
+its visible width and height swap on a quarter turn, with proportional fitting
+and position adjustment if needed to keep it inside the page. Dragging and
+resizing use this rotated box. Each rotation is one undo step. Copies inherit
+the selected region's rotation and can then be rotated independently. Rotation
+is saved in projects and preserved in PDF exports without rasterizing the content.
+
+To duplicate a selected region, choose a page in **Copy to page** and press
+**Copy region**. The selected region stays where it is; a new, independent copy
+is selected on the target page. Its size and proportions are preserved unless
+it must shrink to fit. Choose **Page N (current)** to duplicate on the same page,
+including in a one-page PDF. The copy is offset by up to 12 points within the
+page bounds and remains selected, ready to drag to a new position. The view stays
+where you are. Copies can be moved, resized or copied again. They always
+refer to the original PDF content, so deleting or restoring another region does
+not change them. Creating a copy is one undo step, and copies are saved in projects
+and exported without rasterizing their text or vector graphics.
+
+Use **Delete region**, Delete, or Backspace to remove the selected cutout from
+the visible layout. Its original source stays covered with white. If it was moved
+to another page, the content underneath its former destination becomes visible
+again. Deletion is one undo step and is saved with the project.
+For a copy, **Delete copy**, Delete or Backspace removes only that copy and leaves
+the original and any other copies in place. It can be undone as usual.
+
+**Restore original** cancels the region edit and reveals its original location.
+Expand **Deleted regions** to restore individual deleted areas, including after
+reopening a project. **Clear all** restores all regions and removes the other
+edits. Each selection, move and resize is also one undo step. Saved projects retain
+the source rectangle, source page, destination, rotation, copy flag and deletion state.
+Older projects containing same-page regions also remain supported. Use **Save
+with edits**, then **Download**, to export the finished PDF.
+
+Move region shows the original page while choosing a source, with existing source
+rectangles shaded. It always samples original content, including scanned images,
+before added text, drawings or other region moves. Select separate areas for moves
+and deletions; their source rectangles cannot overlap. Copies can share a source
+with each other or with a moved/deleted region, since copies never cover the source.
+Destinations can overlap, with later edits on top. Up to 200 regions are supported
+in total, including copies and deletions, each at least 2 points wide and high.
+
+Vacated areas become white, and the moved rectangle includes its background.
+This is best for rearranging blocks on plain pages. Export uses clipped original
+PDF content, preserving text and vector quality without rasterizing the page.
+It changes the visible layout: original objects remain in the file and can still
+be searched or extracted. It is **not redaction**; use **Redact** for sensitive
+content. A source or destination touching a link, annotation or form field is
+rejected on export, since those interactive objects cannot move with a region.
 
 ### Organize, crop and resize pages
 
@@ -759,7 +828,7 @@ Margins are 0–5080 mm and must leave at least 1 mm of visible page in both
 dimensions. Resize dimensions are 1–5080 mm, with proportional fitting and
 centering. Omitting `layout` keeps the original organize API behavior.
 
-`edits` is a JSON list of things to draw on top of pages, each with a `type`
+`edits` is a JSON list of overlays or region moves, each with a `type`
 and a 1-based `page`. Positions and sizes are in points on the page as a viewer
 shows it, measured from its top-left corner, so they match what pdf.js
 displays whatever the page's rotation or crop box. Colours are `#rrggbb`.
@@ -777,6 +846,27 @@ displays whatever the page's rotation or crop box. Colours are `#rrggbb`.
 - `image`: `x`, `y`, `width`, `height`, `image` (an index into `images`).
   JPEGs go in as they are; other formats are stored losslessly, with
   transparency kept.
+- `region`: `sourcePage` identifies the original 1-based source page, and
+  `source` (`x`, `y`, `width`, `height`) identifies its rectangle. The edit's
+  `page` is the destination page; `x`, `y`, `width`, `height` identify its
+  destination rectangle. Omitting `sourcePage` uses `page` for compatibility
+  with older same-page clients. Region coordinates are physical display points, including
+  `/UserUnit` scaling. Both rectangles must fit inside their respective visible pages and
+  measure at least 2 points in each dimension. Move/deletion sources cannot overlap.
+  Source and destination rectangles cannot touch annotations, links or form fields.
+  Optional `copy: true` places a cutout without covering its source; copies may
+  share source rectangles with any other region. Omitted or false `copy` keeps
+  the normal move behavior. Move/deletion source areas are covered with white first,
+  then overlays and clipped regions are painted in list order. The original
+  content is retained; this operation does not securely remove it. Optional
+  `deleted: true` covers only the source and omits the cutout at its destination;
+  the unused destination rectangle is not checked against page bounds or
+  annotations. The destination fields remain in the payload to keep the same
+  region format. Omitting `deleted` or setting it to `false` keeps a normal move.
+  `copy` and `deleted` cannot both be true; delete a copy by removing its edit.
+  Optional `rotation` is clockwise 0 (default), 90, 180 or 270 degrees relative
+  to the original displayed crop. The destination `width` and `height` describe
+  the visible box after rotation. The source rectangle and page never rotate.
 - `rect` and `ellipse`: `x`, `y`, `width`, `height`, plus `stroke` with
   `strokeWidth`, `fill`, or both.
 - `highlight`: `x`, `y`, `width`, `height`, `color`; blends like a marker pen,

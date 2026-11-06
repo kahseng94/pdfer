@@ -280,7 +280,7 @@ def edit(
     images: Annotated[list[UploadFile] | None, File()] = None,
     password: Annotated[str, Form()] = "",
 ) -> Response:
-    """Draw text, images and shapes onto pages of one PDF.
+    """Draw overlays, or move/copy/delete regions of the original PDF.
 
     `edits` is a JSON list; see `core.parse_edits` for the fields. Positions
     are in points on the page as displayed, from its top-left corner. Image
