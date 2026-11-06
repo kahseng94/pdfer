@@ -254,6 +254,15 @@ existing non-whitespace text are recognized; a page containing any existing
 text, even just a header, is skipped to avoid duplicate text. Unselected
 pages and pages with text stay in the document.
 
+Enable **Automatically correct sideways or upside-down scans** to turn
+selected scanned pages upright before recognition. This option requires
+Tesseract's local `osd` language pack; install it and choose **Check again**
+if the option is disabled. Only confident 90°, 180° or 270° corrections are
+applied. Sparse, blank or uncertain pages keep their orientation, so review
+the preview and use Organize to rotate them manually if needed. The result
+reports how many pages were rotated. Existing-text and unselected pages
+keep their original orientation.
+
 Press **Recognize text**. Progress identifies the current page and stage,
 and **Cancel OCR** stops rendering or the running native OCR process. A
 failure identifies its page and produces no partial result. Changing the
@@ -265,11 +274,12 @@ preserved, and protected PDFs keep their opening password.
 The browser renders each selected scan using PDF.js. Local Tesseract creates
 an invisible text layer; the backend places it over the original page,
 respecting rotation, crop boxes and page scaling. Original images, page
-sizes, bookmarks, forms and other PDF objects are preserved. OCR does not
-redact content or modify the page's visible appearance. Recognition is best
-for upright printed text; it can misread characters, columns and handwriting.
-Review the extracted text before relying on it. This version does not
-automatically rotate or deskew scans, or replace existing OCR text.
+sizes, bookmarks, forms and other PDF objects are preserved. OCR keeps the
+page's visible content; optional automatic rotation changes only its viewing
+orientation, without resampling the original image. Recognition is best for
+printed text; it can misread characters, columns and handwriting. Review the
+extracted text before relying on it. OCR does not redact content, deskew
+scans or replace existing OCR text.
 
 OCR requires **Tesseract 4 or newer** and its language data on the backend
 computer. Other tools continue to work without it. The OCR tab reports
@@ -278,7 +288,8 @@ missing dependencies and offers **Check again** after installation:
 - macOS: `brew install tesseract` includes English. For additional languages,
   use `brew install tesseract-lang`.
 - Debian/Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-eng`.
-  Add language packages such as `tesseract-ocr-fra` as needed.
+  Add language packages such as `tesseract-ocr-fra` as needed, and
+  `tesseract-ocr-osd` for automatic rotation.
 - Windows: install Tesseract using the options in the
   [official installation guide](https://tesseract-ocr.github.io/tessdoc/Installation.html)
   and add its executable directory to `PATH`.
@@ -444,9 +455,12 @@ pnpm test       # backend (pytest) and frontend (vitest)
 ```
 
 The OCR tests include real recognition when Tesseract and its English language
-pack are installed; that integration test is skipped otherwise. Process
-cancellation, page geometry, password retention and the remaining OCR tests
-run without the native engine.
+pack are installed, plus automatic-rotation integration tests when `osd` is
+available. Those integration tests are skipped when their language packs are
+missing. The test-only pypdfium2 dependency verifies rendered pixels and text
+placement, including encrypted, cropped, scaled and rotated pages. Process
+cancellation, page geometry, password retention and visual-preservation tests
+run without Tesseract. The app itself does not need pypdfium2 or OCRmyPDF.
 
 The repo is a pnpm workspace with one package, `frontend`. Add frontend
 dependencies with `pnpm --filter pdfer-frontend add <pkg>` and backend ones with
@@ -490,9 +504,9 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 
 | Endpoint | Form fields | Returns |
 |---|---|---|
-| `GET /api/ocr/status` | | local engine availability and installed recognition languages |
-| `POST /api/ocr/page` | `image` (PNG), `languages` (e.g. `eng+fra`), `dpi` (150 or 300) | an invisible, one-page PDF text layer |
-| `POST /api/ocr/assemble` | `file`, `layers` (PDF text layers), `pages` (JSON page-number list), optional `password` | `<name>_searchable.pdf`, preserving original pages and password |
+| `GET /api/ocr/status` | | local engine availability, installed recognition languages and `can_rotate` |
+| `POST /api/ocr/page` | `image` (PNG), `languages` (e.g. `eng+fra`), `dpi` (150 or 300), optional `rotate` (default false) | an invisible, one-page PDF text layer and `X-OCR-Rotation` (clockwise correction) |
+| `POST /api/ocr/assemble` | `file`, `layers` (PDF text layers), `pages` (JSON page-number list), optional `password`, `rotations` (aligned JSON list of 0/90/180/270, default all zero) | `<name>_searchable.pdf`, preserving original content and password with the requested page rotations |
 | `POST /api/merge` | `files` (2 or more, in order), optional `passwords` | `merged.pdf` |
 | `POST /api/split` | `file`, `mode`, `ranges`, optional `password` | a PDF, or a zip if there are several outputs |
 | `POST /api/organize` | `file`, `pages`, optional `layout` (JSON), optional `password` | `<name>_organized.pdf`, used for preview and download |

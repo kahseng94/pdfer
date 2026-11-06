@@ -4,7 +4,7 @@ import { pagesIn, parseSpec } from './ranges'
 
 export const OCR_DPI = [150, 300] as const
 export type OcrProgress = {
-  completed: number; total: number; page: number; skipped: number; recognized: number
+  completed: number; total: number; page: number; skipped: number; recognized: number; rotated: number
   phase: 'inspect' | 'render' | 'recognize' | 'assemble'
 }
 
@@ -17,17 +17,18 @@ export function ocrPages(spec: string, total: number): number[] {
 
 /** Render only text-free selected pages; add invisible text to the original PDF. */
 export async function recognizePdf(doc: PDFDocumentProxy, source: File, spec: string, languages: readonly string[], dpi: number,
-  signal: AbortSignal, onProgress: (value: OcrProgress) => void): Promise<File> {
+  signal: AbortSignal, onProgress: (value: OcrProgress) => void, rotate = false): Promise<File> {
   const selected = ocrPages(spec, doc.numPages)
   if (source.size > 128 * 1024 * 1024) throw new Error('Choose a PDF under 128 MB, or split it first.')
   if (!languages.length || languages.length > 8) throw new Error('Choose between one and eight OCR languages.')
   if (!(OCR_DPI as readonly number[]).includes(dpi)) throw new Error('Choose 150 or 300 DPI.')
   const layers: File[] = []
   const pages: number[] = []
-  let skipped = 0, bytes = 0
+  const rotations: number[] = []
+  let skipped = 0, bytes = 0, rotated = 0
   for (const [index, number] of selected.entries()) {
     signal.throwIfAborted()
-    const progress = (phase: OcrProgress['phase']) => onProgress({ completed: index, total: selected.length, page: number, skipped, recognized: layers.length, phase })
+    const progress = (phase: OcrProgress['phase']) => onProgress({ completed: index, total: selected.length, page: number, skipped, recognized: layers.length, rotated, phase })
     progress('inspect')
     const page = await doc.getPage(number)
     signal.throwIfAborted()
@@ -55,11 +56,13 @@ export async function recognizePdf(doc: PDFDocumentProxy, source: File, spec: st
       // Free the full-resolution raster before waiting on the native OCR engine.
       canvas.width = 0; canvas.height = 0
       progress('recognize')
-      const layer = await recognizePage(blob, languages, dpi, signal)
+      const { file: layer, rotation } = await recognizePage(blob, languages, dpi, signal, rotate)
       signal.throwIfAborted()
       bytes += layer.size
       if (layer.size > 8 * 1024 * 1024 || bytes > 64 * 1024 * 1024) throw new Error('The OCR text is too large. Split the document first.')
       layers.push(layer); pages.push(number)
+      rotations.push(rotation)
+      if (rotation) rotated++
     } catch (reason) {
       signal.throwIfAborted()
       throw new Error(`Page ${number}: ${(reason as Error).message}`)
@@ -70,8 +73,8 @@ export async function recognizePdf(doc: PDFDocumentProxy, source: File, spec: st
   }
   signal.throwIfAborted()
   if (!layers.length) throw new Error('All selected pages already contain text. Open this PDF in Search & text, or choose other pages.')
-  onProgress({ completed: selected.length, total: selected.length, page: selected.at(-1)!, skipped, recognized: layers.length, phase: 'assemble' })
-  const output = await assembleOcr(source, layers, pages, signal)
+  onProgress({ completed: selected.length, total: selected.length, page: selected.at(-1)!, skipped, recognized: layers.length, rotated, phase: 'assemble' })
+  const output = await assembleOcr(source, layers, pages, signal, rotations)
   signal.throwIfAborted()
   return output
 }

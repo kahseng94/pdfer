@@ -135,16 +135,18 @@ def ocr_status() -> Response:
 
 
 @app.post("/api/ocr/page")
-async def ocr_page(request: Request, image: UploadFile, languages: Annotated[str, Form()], dpi: Annotated[int, Form()] = 300) -> Response:
+async def ocr_page(request: Request, image: UploadFile, languages: Annotated[str, Form()], dpi: Annotated[int, Form()] = 300, rotate: Annotated[bool, Form()] = False) -> Response:
     data = await image.read(ocr.MAX_IMAGE_BYTES + 1)
     if len(data) > ocr.MAX_IMAGE_BYTES:
         raise core.PdfToolError("This page image is too large. Choose 150 DPI or split the PDF first.")
-    output = await ocr.recognize(data, languages, dpi, request.is_disconnected)
-    return _download(output, "text.pdf", "application/pdf")
+    output, rotation = await ocr.recognize(data, languages, dpi, request.is_disconnected, rotate=rotate)
+    response = _download(output, "text.pdf", "application/pdf")
+    response.headers["X-OCR-Rotation"] = str(rotation)
+    return response
 
 
 @app.post("/api/ocr/assemble")
-def ocr_assemble(file: UploadFile, layers: Annotated[list[UploadFile], File()], pages: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
+def ocr_assemble(file: UploadFile, layers: Annotated[list[UploadFile], File()], pages: Annotated[str, Form()], password: Annotated[str, Form()] = "", rotations: Annotated[str, Form()] = "") -> Response:
     source = file.file.read(ocr.MAX_SOURCE_BYTES + 1)
     if len(source) > ocr.MAX_SOURCE_BYTES or len(layers) > 1000:
         raise core.PdfToolError("This PDF is too large for OCR. Split it first.")
@@ -157,7 +159,7 @@ def ocr_assemble(file: UploadFile, layers: Annotated[list[UploadFile], File()], 
             raise core.PdfToolError("This OCR result is too large. Split the document first.")
         contents.append(data)
         total += len(data)
-    output = ocr.assemble(source, contents, pages, file.filename or "document.pdf", password)
+    output = ocr.assemble(source, contents, pages, file.filename or "document.pdf", password, rotations=rotations)
     return _download(output, f"{_stem(file.filename)}_searchable.pdf", "application/pdf")
 
 

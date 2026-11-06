@@ -20,8 +20,9 @@ it('sends only the page image and OCR options to the recognition endpoint', asyn
   const [path, request] = fetch.mock.calls[0]
   expect(path).toBe('/api/ocr/page')
   expect(request.signal).toBe(signal)
-  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi'])
+  expect([...request.body.keys()]).toEqual(['image', 'languages', 'dpi', 'rotate'])
   expect(request.body.get('languages')).toBe('eng+fra')
+  expect(request.body.get('rotate')).toBe('false')
 })
 
 it('retains passwords in the assembled result and forwards cancellation', async () => {
@@ -39,4 +40,21 @@ it('retains passwords in the assembled result and forwards cancellation', async 
   expect(await request.body.get('file').text()).toBe('original')
   expect(result.name).toBe('scan_searchable.pdf')
   expect(pdfPassword(result)).toBe('secret')
+})
+
+it('carries orientation corrections from recognition into the assembled document', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response('text layer', { headers: { 'content-type': 'application/pdf', 'X-OCR-Rotation': '270' } }))
+  vi.stubGlobal('fetch', fetch)
+  const signal = new AbortController().signal
+  const result = await recognizePage(new Blob(['image']), ['eng'], 300, signal, true)
+  expect(result.rotation).toBe(270)
+  expect(fetch.mock.calls[0][1].body.get('rotate')).toBe('true')
+  fetch.mockResolvedValue(new Response('searchable', { headers: { 'content-type': 'application/pdf' } }))
+  await assembleOcr(new File(['pdf'], 'scan.pdf'), [result.file], [3], signal, [result.rotation])
+  expect(fetch.mock.calls[1][1].body.get('rotations')).toBe('[270]')
+})
+
+it.each(['45', '-90', '360', 'NaN'])('rejects invalid rotation headers (%s)', async (rotation) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('text layer', { headers: { 'X-OCR-Rotation': rotation } })))
+  await expect(recognizePage(new Blob(['image']), ['eng'], 300, new AbortController().signal, true)).rejects.toThrow('invalid page rotation')
 })

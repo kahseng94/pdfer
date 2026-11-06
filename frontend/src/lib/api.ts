@@ -79,7 +79,8 @@ export async function rebuildRedactedPdf(source: File, pages: File[], sizes: Pdf
   return file
 }
 
-export type OcrStatus = { available: boolean; languages: string[]; message: string | null }
+export type OcrStatus = { available: boolean; languages: string[]; can_rotate: boolean; message: string | null }
+export type OcrPage = { file: File; rotation: number }
 
 export async function readOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
   let response: Response
@@ -89,18 +90,23 @@ export async function readOcrStatus(signal?: AbortSignal): Promise<OcrStatus> {
   return response.json() as Promise<OcrStatus>
 }
 
-export function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal): Promise<File> {
+export async function recognizePage(image: Blob, languages: readonly string[], dpi: number, signal: AbortSignal, rotate = false): Promise<OcrPage> {
   const body = new FormData()
   body.append('image', image, 'page.png')
   body.append('languages', languages.join('+'))
   body.append('dpi', String(dpi))
-  return post('/api/ocr/page', body, 'text.pdf', '', signal)
+  body.append('rotate', String(rotate))
+  const { file, headers } = await upload('/api/ocr/page', body, 'text.pdf', signal)
+  const rotation = Number(headers.get('X-OCR-Rotation') ?? '0')
+  if (![0, 90, 180, 270].includes(rotation) || (!rotate && rotation !== 0)) throw new Error('OCR returned an invalid page rotation.')
+  return { file, rotation }
 }
 
-export function assembleOcr(file: File, layers: readonly File[], pages: readonly number[], signal: AbortSignal): Promise<File> {
+export function assembleOcr(file: File, layers: readonly File[], pages: readonly number[], signal: AbortSignal, rotations?: readonly number[]): Promise<File> {
   const body = pdfBody(file)
   for (const layer of layers) body.append('layers', layer)
   body.append('pages', JSON.stringify(pages))
+  if (rotations) body.append('rotations', JSON.stringify(rotations))
   return post('/api/ocr/assemble', body, 'searchable.pdf', pdfPassword(file), signal)
 }
 

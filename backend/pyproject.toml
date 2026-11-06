@@ -26,6 +26,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
+    "pypdfium2>=5.14.0",
     "pytest>=9.1.1",
 ]
 

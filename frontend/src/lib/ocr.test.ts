@@ -23,7 +23,7 @@ function fixture(texts = ['', 'Existing selectable text', '']) {
   }))
   const getPage = vi.fn(async (number: number) => pages[number - 1])
   const doc = { numPages: pages.length, getPage } as unknown as PDFDocumentProxy
-  recognize.mockResolvedValue(new File(['text layer'], 'text.pdf', { type: 'application/pdf' }))
+  recognize.mockResolvedValue({ file: new File(['text layer'], 'text.pdf', { type: 'application/pdf' }), rotation: 0 })
   assemble.mockResolvedValue(new File(['searchable PDF'], 'scan_searchable.pdf', { type: 'application/pdf' }))
   return { doc, pages, getPage, canvases }
 }
@@ -40,11 +40,11 @@ it('recognizes only text-free pages, preserves the full source, and releases ras
   const progress = vi.fn()
   const output = await recognizePdf(doc, source, '', ['eng', 'fra'], 300, signal, progress)
   expect(recognize).toHaveBeenCalledTimes(2)
-  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal])
+  expect(recognize.mock.calls[0].slice(1)).toEqual([['eng', 'fra'], 300, signal, false])
   expect(pages[1].render).not.toHaveBeenCalled()
-  expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal)
+  expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal, [0, 0])
   expect(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true)
-  expect(progress).toHaveBeenLastCalledWith({ completed: 3, total: 3, page: 3, skipped: 1, recognized: 2, phase: 'assemble' })
+  expect(progress).toHaveBeenLastCalledWith({ completed: 3, total: 3, page: 3, skipped: 1, recognized: 2, rotated: 0, phase: 'assemble' })
   expect(output.name).toBe('scan_searchable.pdf')
 })
 
@@ -53,6 +53,19 @@ it('processes only the requested page ranges', async () => {
   await recognizePdf(doc, source, '3, 1, 3', ['eng'], 150, new AbortController().signal, vi.fn())
   expect(getPage.mock.calls).toEqual([[1], [3]])
   expect(assemble.mock.calls[0][2]).toEqual([1, 3])
+})
+
+it('keeps rotation corrections aligned with recognized pages and reports their count', async () => {
+  const { doc } = fixture(['', 'Existing text', '', ''])
+  recognize.mockResolvedValueOnce({ file: new File(['first'], 'text.pdf'), rotation: 90 })
+    .mockResolvedValueOnce({ file: new File(['third'], 'text.pdf'), rotation: 0 })
+  const signal = new AbortController().signal
+  const progress = vi.fn()
+  await recognizePdf(doc, source, '1-3', ['eng'], 150, signal, progress, true)
+  expect(recognize).toHaveBeenCalledTimes(2)
+  expect(recognize.mock.calls.every((call) => call[4] === true)).toBe(true)
+  expect(assemble).toHaveBeenCalledWith(source, [expect.any(File), expect.any(File)], [1, 3], signal, [90, 0])
+  expect(progress).toHaveBeenLastCalledWith({ completed: 3, total: 3, page: 3, skipped: 1, recognized: 2, rotated: 1, phase: 'assemble' })
 })
 
 it('offers no redundant output when all selected pages already contain text', async () => {
@@ -95,7 +108,7 @@ it('cancels rendering, releases the canvas, and rejects late outputs after cance
 
 it('identifies a failed page without returning earlier successful pages', async () => {
   const { doc } = fixture(['', ''])
-  recognize.mockResolvedValueOnce(new File(['text'], 'text.pdf')).mockRejectedValueOnce(new Error('engine failed'))
+  recognize.mockResolvedValueOnce({ file: new File(['text'], 'text.pdf'), rotation: 0 }).mockRejectedValueOnce(new Error('engine failed'))
   await expect(recognizePdf(doc, source, '', ['eng'], 300, new AbortController().signal, vi.fn())).rejects.toThrow('Page 2: engine failed')
   expect(assemble).not.toHaveBeenCalled()
 })
