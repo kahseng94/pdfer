@@ -4,13 +4,26 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { releaseSettings } = require('../release-config.cjs')
+const { releaseSettings, normalizeSigningEnvironment } = require('../release-config.cjs')
 const { generate, publicKeyFromSeed, privateKeyFromSeed } = require('../sparkle/keys.cjs')
 const { appcast } = require('../sparkle/publish.cjs')
 
 const seed = Buffer.alloc(32, 7).toString('base64')
 const publicKey = publicKeyFromSeed(seed)
 const releaseEnv = { PDFER_RELEASE: '1', GITHUB_REPOSITORY: 'example/pdfer' }
+
+test('unset CI certificate secrets are absent instead of empty file paths', () => {
+  const env = { ...releaseEnv, CSC_LINK: '', WIN_CSC_LINK: '', MAC_CSC_LINK: '', CSC_KEY_PASSWORD: '' }
+  normalizeSigningEnvironment(env)
+  assert.equal('CSC_LINK' in env, false)
+  assert.equal('WIN_CSC_LINK' in env, false)
+  assert.equal('MAC_CSC_LINK' in env, false)
+  assert.equal(releaseSettings({ env, platform: 'darwin', publicKey }).osSigning, false)
+  const supplied = { CSC_LINK: 'certificate.p12', CSC_KEY_PASSWORD: ' password ' }
+  normalizeSigningEnvironment(supplied)
+  assert.equal(supplied.CSC_LINK, 'certificate.p12')
+  assert.equal(supplied.CSC_KEY_PASSWORD, ' password ')
+})
 
 test('unsigned Windows releases retain NSIS update publishing', () => {
   const config = releaseSettings({ env: releaseEnv, platform: 'win32', arch: 'x64', publicKey })

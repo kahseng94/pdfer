@@ -12,11 +12,16 @@ and Linux x64. Intel Macs can use the included Tesseract engine.
 
 ## Development and local installers
 
+The Mac installers require macOS 15 or newer, matching the bundled PDF engine.
 Build-machine prerequisites: Node 24, pnpm (the version in package.json), uv,
-and Tesseract with `eng` and `osd` data. On macOS: `brew install tesseract`.
+and Tesseract with `eng` and `osd` data. On macOS: `brew install tesseract qpdf`.
 On Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd`.
 On Windows, install Tesseract and put its folder on PATH. These dependencies
 are needed only by developers, not by the person installing pdfer.
+
+Intel Mac builds compile pikepdf from source. Before `pnpm install`, set
+`QPDF_SOURCE_TREE` to the output of `brew --prefix qpdf` and
+`QPDF_BUILD_LIBDIR` to that directory's `lib` subfolder. CI sets these automatically.
 
 ```sh
 pnpm install

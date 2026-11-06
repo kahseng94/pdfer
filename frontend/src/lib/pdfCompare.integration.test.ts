@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { deflateSync } from 'node:zlib'
 import { readFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -11,6 +12,7 @@ const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/bui
 const { loadPdf, closePdf } = await import('./pdf')
 GlobalWorkerOptions.workerSrc = import.meta.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')
 const requirePdf = createRequire(import.meta.resolve('pdfjs-dist/package.json'))
+const standardFontDataUrl = fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/')
 const { createCanvas } = requirePdf('@napi-rs/canvas') as { createCanvas: (width: number, height: number) => HTMLCanvasElement }
 const documents: PDFDocumentProxy[] = []
 afterEach(async () => { for (const doc of documents.splice(0)) await doc.loadingTask.destroy(); releases.length = 0 })
@@ -37,7 +39,8 @@ function pdf(pages: { stream?: string; geometry?: string }[], compressed = false
   return new Uint8Array(Buffer.concat(parts))
 }
 async function open(pages: Parameters<typeof pdf>[0], compressed = false) {
-  const doc = await getDocument({ data: pdf(pages, compressed), useSystemFonts: true }).promise
+  // Use PDF.js's bundled fonts so a minimal CI image renders visible text too.
+  const doc = await getDocument({ data: pdf(pages, compressed), useSystemFonts: false, standardFontDataUrl }).promise
   documents.push(doc); return doc
 }
 const text = (value: string, invisible = false) => `BT /F1 12 Tf ${invisible ? '3 Tr' : ''} 10 90 Td (${value}) Tj ET`

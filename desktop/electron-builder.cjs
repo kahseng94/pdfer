@@ -1,8 +1,9 @@
 const fs = require('node:fs')
 const path = require('node:path')
-const { releaseSettings } = require('./release-config.cjs')
+const { releaseSettings, normalizeSigningEnvironment } = require('./release-config.cjs')
 const { distribution } = require('./sparkle/prepare.cjs')
 
+normalizeSigningEnvironment()
 const settings = releaseSettings()
 
 module.exports = {
@@ -31,7 +32,7 @@ module.exports = {
   generateUpdatesFilesForAllChannels: false,
   // macOS uses signed Sparkle feeds; NSIS/AppImage continue using electron-updater.
   publish: process.platform === 'darwin' ? null : settings.publish,
-  mac: { category: 'public.app-category.productivity', target: ['dmg', 'zip'],
+  mac: { category: 'public.app-category.productivity', target: ['dmg', 'zip'], minimumSystemVersion: '15.0',
     identity: settings.osSigning ? undefined : '-',
     hardenedRuntime: settings.osSigning, notarize: settings.notarize,
     extraFiles: [{ from: path.join(distribution, 'Sparkle.framework'), to: 'Frameworks/Sparkle.framework' }],

@@ -1,5 +1,14 @@
 const { readPublicKey } = require('./sparkle/keys.cjs')
 
+// GitHub supplies an empty string for unset optional secrets. electron-builder
+// treats an empty certificate path as the working directory, so omit it entirely.
+function normalizeSigningEnvironment(env = process.env) {
+  for (const name of ['CSC_LINK', 'WIN_CSC_LINK', 'MAC_CSC_LINK']) {
+    if (env[name] === '') delete env[name]
+  }
+  return env
+}
+
 function releaseSettings({ env = process.env, platform = process.platform, arch = process.arch, publicKey = readPublicKey(env) } = {}) {
   const repository = env.PDFER_RELEASE_REPOSITORY || env.GITHUB_REPOSITORY
   if (repository && !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Release repository must be owner/repository.')
@@ -25,4 +34,4 @@ function releaseSettings({ env = process.env, platform = process.platform, arch 
     sparkleEnabled: platform === 'darwin' && !!feedURL && !!publicKey }
 }
 
-module.exports = { releaseSettings }
+module.exports = { releaseSettings, normalizeSigningEnvironment }
