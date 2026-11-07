@@ -9,8 +9,8 @@ export function ProjectsPanel() {
   const manager = useContext(ProjectContext)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   if (!manager) return null
-  return <details className="mb-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Saved projects{manager.projects.length > 0 && ` (${manager.projects.length})`}{manager.error && ' · Needs attention'}</summary>
+  return <details className="saved-projects">
+    <summary><svg className="projects-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7V4h6l3 3h9v13H3V7Z" /></svg><span>Saved projects{manager.projects.length > 0 && ` (${manager.projects.length})`}{manager.error && ' · Needs attention'}</span><span className="projects-location">On this device</span><svg className="projects-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></summary>
     <div className="space-y-3 border-t border-zinc-200 p-4 dark:border-zinc-800">
       <p className="text-sm text-zinc-500">Work in Edit, Organize, and Signatures is saved automatically as you make changes. Projects include your PDF and placed images, and stay in this browser on this device. Clearing site data removes them. Passwords are never saved.</p>
       <button type="button" disabled={manager.loading || !!manager.working} onClick={() => void manager.refresh()} className="text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400">Refresh projects</button>

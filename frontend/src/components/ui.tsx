@@ -1,14 +1,13 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
 /** Classes for a small select or text input. */
-export const FIELD =
-  'rounded border border-zinc-300 bg-white px-1.5 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
+export const FIELD = 'ui-field'
 
 export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
-      className={`w-full rounded-lg bg-rose-600 px-4 py-2.5 font-medium text-white shadow-sm hover:bg-rose-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 ${className}`}
+      className={`ui-button ${className}`}
       {...props}
     />
   )

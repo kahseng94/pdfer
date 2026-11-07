@@ -219,7 +219,7 @@ export function SplitTool({ active = true }: { active?: boolean }) {
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {doc && (
-        <div className="sticky bottom-4 space-y-2">
+        <div className="tool-actions space-y-2">
           {result.value && <ResultCard file={result.value} from="split" onDismiss={result.clear} />}
           <Button onClick={run} disabled={busy || (picking && (ranges.length === 0 || invalid.length > 0))}>
             {busy ? 'Working…' : action}

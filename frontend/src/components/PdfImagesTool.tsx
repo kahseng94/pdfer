@@ -212,7 +212,7 @@ export function PdfImagesTool({ active = true }: { active?: boolean }) {
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {doc && (
-        <div className="sticky bottom-4 space-y-2">
+        <div className="tool-actions space-y-2">
           {result.value && <ResultCard file={result.value} from="pdf-images" onDismiss={result.clear} downloadLabel="Download ZIP">
             {selected.size} {format.toUpperCase()} {selected.size === 1 ? 'image' : 'images'} · {dpi} DPI
           </ResultCard>}
