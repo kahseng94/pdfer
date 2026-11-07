@@ -166,13 +166,4 @@ async function launch(options = {}) {
   return { window, backend, updates, ocr, cleanup, dataDir }
 }
 
-if (require.main === module) {
-  configureDataDir()
-  if (!app.requestSingleInstanceLock()) app.quit()
-  else launch().catch((error) => {
-    dialog.showErrorBox('Could not start pdfer', `${error.message}\n\nPlease reinstall the app if this continues.`)
-    app.quit()
-  })
-}
-
-module.exports = { launch }
+module.exports = { configureDataDir, launch }

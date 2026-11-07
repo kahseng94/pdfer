@@ -625,7 +625,7 @@ export function EditTool({ active = true }: { active?: boolean }) {
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {doc && (
-        <div ref={actionsRef} className="sticky bottom-4 space-y-2">
+        <div ref={actionsRef} className="tool-actions space-y-2">
           {result.value && <ResultCard file={result.value} from="edit" onDismiss={result.clear} />}
           <Button onClick={save} disabled={busy || count === 0 || unwritable.length > 0}>
             {busy ? 'Saving…' : count === 0 ? 'Make an edit first' : `Save with ${count} ${count === 1 ? 'edit' : 'edits'}`}

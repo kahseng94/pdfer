@@ -209,7 +209,7 @@ function PdfCompress({ batch, onAdd, onClear }: {
         {totals && <p className="text-sm">{count > 1 && 'Combined PDF size: '}<PdfSavings {...totals} /></p>}
         <PdfCompressionPreview result={result} items={items} onDismiss={batch.dismiss} />
       </>}
-      <div className="sticky bottom-4 space-y-2">
+      <div className="tool-actions space-y-2">
         <Button onClick={batch.run} disabled={busy || opening || unreadable > 0 || !!batch.targetError}>
           {busy ? 'Compressing…' : batch.targetEnabled ? 'Compress and preview' : count === 1 ? 'Compress' : `Compress ${count} PDFs`}
         </Button>
@@ -376,7 +376,7 @@ function ImagesCompress({
         </ResultCard>
       )}
 
-      <div className="sticky bottom-4">
+      <div className="tool-actions">
         <Button onClick={run} disabled={busy || unreadable > 0 || !limitOk}>
           {busy ? 'Compressing…' : `Compress ${count} ${count === 1 ? 'image' : 'images'}`}
         </Button>

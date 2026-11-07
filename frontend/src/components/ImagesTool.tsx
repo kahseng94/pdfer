@@ -40,7 +40,9 @@ type Item = {
   error: string | null
 }
 
-export function ImagesTool({ active = true }: { active?: boolean }) {
+export function ImagesTool({ active = true, kind = 'image' }: { active?: boolean; kind?: 'image' | 'png' | 'jpg' }) {
+  const tool = kind === 'image' ? 'images' : kind
+  const label = kind === 'image' ? 'images' : `${kind.toUpperCase()} images`
   const [items, setItems] = useState<Item[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -164,12 +166,12 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
   }
 
   function take(files: File[]) {
-    const { wanted } = pickFiles(files, 'image')
+    const { wanted } = pickFiles(files, kind)
     if (wanted.length) addFiles(wanted)
   }
 
   const dragging = useWindowDrop(take, active)
-  useReceive('images', take)
+  useReceive(tool, take)
 
   // Paste adds images while this tab is showing, unless the paste is meant for a text field.
   const add = useRef(addFiles)
@@ -180,14 +182,14 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
     if (!active) return
     function onPaste(e: ClipboardEvent) {
       if ((e.target as Element | null)?.closest?.('input, textarea, [contenteditable]')) return
-      const { wanted } = pickFiles(e.clipboardData?.files ?? [], 'image')
+      const { wanted } = pickFiles(e.clipboardData?.files ?? [], kind)
       if (!wanted.length) return
       e.preventDefault()
       add.current(wanted.map(named))
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-  }, [active])
+  }, [active, kind])
 
   const unreadable = items.filter((it) => it.error).length
   const loading = items.some((it) => !it.size && !it.error)
@@ -198,7 +200,7 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
   // survives the switch from the empty state to the list.
   return (
     <div className="space-y-4">
-      {dragging && <DropOverlay label="Drop images to add" />}
+      {dragging && <DropOverlay label={`Drop ${label} to add`} />}
       {!empty && (
         <>
           <div className="flex items-baseline justify-between">
@@ -227,10 +229,10 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
       )}
 
       <Dropzone
-        kind="image"
+        kind={kind}
         multiple
         compact={!empty}
-        title={empty ? 'Choose images to turn into a PDF' : 'Add more images'}
+        title={empty ? `Choose ${label}` : `Add more ${label}`}
         onFiles={addFiles}
       />
       <p className="text-center text-sm text-zinc-500">You can also paste an image.</p>
@@ -252,17 +254,17 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
                   </select>
                 </label>
                 <label className="space-y-1 text-sm">Margins (mm)
-                  <input aria-label="Margins (mm)" type="number" min={0} max={100} step={1} value={Number.isNaN(layout.marginMm) ? '' : layout.marginMm} onChange={(e) => changeLayout({ marginMm: e.target.valueAsNumber })} aria-describedby="image-margins-hint" className={`${FIELD} block w-full px-2 py-2`} />
+                  <input aria-label="Margins (mm)" type="number" min={0} max={100} step={1} value={Number.isNaN(layout.marginMm) ? '' : layout.marginMm} onChange={(e) => changeLayout({ marginMm: e.target.valueAsNumber })} aria-describedby={`${tool}-margins-hint`} className={`${FIELD} block w-full px-2 py-2`} />
                 </label>
               </>}
             </div>
             {layout.paper !== 'image' ? <>
-              <p id="image-margins-hint" className="text-sm text-zinc-500">Margins apply equally to all four sides. Use 0 mm for no margins.</p>
+              <p id={`${tool}-margins-hint`} className="text-sm text-zinc-500">Margins apply equally to all four sides. Use 0 mm for no margins.</p>
               <fieldset>
                 <legend className="mb-2 text-sm font-medium">Image fitting</legend>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {IMAGE_FITS.map((fit) => <label key={fit.value} className={`cursor-pointer rounded-lg border px-3 py-2.5 has-focus-visible:outline-2 has-focus-visible:outline-rose-600 ${layout.fit === fit.value ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/30' : 'border-zinc-200 dark:border-zinc-800'}`}>
-                    <input type="radio" name="image-pdf-fit" aria-label={fit.label} checked={layout.fit === fit.value} onChange={() => changeLayout({ fit: fit.value })} className="sr-only" />
+                    <input type="radio" name={`${tool}-pdf-fit`} aria-label={fit.label} checked={layout.fit === fit.value} onChange={() => changeLayout({ fit: fit.value })} className="sr-only" />
                     <span className="block text-sm font-medium">{fit.label}</span><span className="block text-sm text-zinc-500">{fit.hint}</span>
                   </label>)}
                 </div>
@@ -299,7 +301,7 @@ export function ImagesTool({ active = true }: { active?: boolean }) {
           <p className="truncate text-xs text-zinc-500">{items[page - 1]?.file.name}</p>
           <DocumentPreview doc={result.value.doc} page={page} onReady={onReady} />
         </section>
-        {rendered === result.value.doc && <ResultCard file={result.value.file} from="images" onDismiss={() => { invalidatePreview(); setPreviewed(false) }} downloadLabel="Download PDF">
+        {rendered === result.value.doc && <ResultCard file={result.value.file} from={tool} onDismiss={() => { invalidatePreview(); setPreviewed(false) }} downloadLabel="Download PDF">
           {result.value.doc.numPages} {result.value.doc.numPages === 1 ? 'page' : 'pages'} · {imageLayoutSummary(outputLayout)}
         </ResultCard>}
       </>}

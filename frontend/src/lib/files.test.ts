@@ -28,4 +28,18 @@ describe('pickFiles', () => {
   it('handles an empty list', () => {
     expect(pickFiles([], 'pdf')).toEqual({ wanted: [], skipped: 0 })
   })
+
+  it('accepts modern and legacy Office extensions without relying on MIME types', () => {
+    const all = ['REPORT.DOC', 'report.docx', 'budget.xls', 'budget.XLSX', 'talk.ppt', 'talk.pptx', 'macro.docm', 'fake.zip'].map((name) => file(name))
+    expect(pickFiles(all, 'word').wanted.map((f) => f.name)).toEqual(['REPORT.DOC', 'report.docx'])
+    expect(pickFiles(all, 'excel').wanted.map((f) => f.name)).toEqual(['budget.xls', 'budget.XLSX'])
+    expect(pickFiles(all, 'powerpoint').wanted.map((f) => f.name)).toEqual(['talk.ppt', 'talk.pptx'])
+    expect(pickFiles([file('bad.txt', 'application/msword')], 'word').skipped).toBe(1)
+  })
+
+  it('filters the dedicated PNG and JPG inputs while keeping both JPEG extensions', () => {
+    const all = [file('a.PNG'), file('b.JPG'), file('c.jpeg'), file('paste', 'image/png'), file('x.webp')]
+    expect(pickFiles(all, 'png').wanted.map((f) => f.name)).toEqual(['a.PNG', 'paste'])
+    expect(pickFiles(all, 'jpg').wanted.map((f) => f.name)).toEqual(['b.JPG', 'c.jpeg'])
+  })
 })

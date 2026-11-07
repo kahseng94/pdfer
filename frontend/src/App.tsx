@@ -1,11 +1,13 @@
 import { lazy, Suspense, useState } from 'react'
 import { HandoffContext, type Delivery } from './lib/handoff'
 import { loadTool, saveTool } from './lib/lastTool'
-import { TOOL_IDS, TOOLS, type ToolId } from './lib/tools'
+import { TOOL_IDS, type ToolId } from './lib/tools'
 import { CompressTool } from './components/CompressTool'
 import { EditTool } from './components/EditTool'
-import { LogoIcon } from './components/icons'
+import { LocalFilesNote, ToolNavigation } from './components/ToolNavigation'
+import { focusToolNavigation, TOOL_DETAILS } from './lib/toolNavigation'
 import { ImagesTool } from './components/ImagesTool'
+import { OfficeTool } from './components/OfficeTool'
 import { MergeTool } from './components/MergeTool'
 import { OrganizeTool } from './components/OrganizeTool'
 import { PdfImagesTool } from './components/PdfImagesTool'
@@ -43,45 +45,22 @@ export default function App() {
     select(to)
     window.scrollTo({ top: 0 })
     // The button pressed is in the tab being hidden, so keyboard focus moves to the new tab.
-    document.getElementById(`tab-${to}`)?.focus()
+    focusToolNavigation(to)
   }
 
   return (
     <HandoffContext value={{ delivery, send }}>
       <ProjectContext value={projects}>
-        <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-          <main className={`mx-auto ${tool === 'compare' ? 'max-w-6xl' : 'max-w-3xl'} px-4 py-10 sm:py-14`}>
-            <header className="mb-8 flex items-center gap-3">
-              <LogoIcon className="size-9" />
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight">pdfer</h1>
-                <p className="text-sm text-zinc-500">Merge, split, organize, search, edit, compress and protect PDFs, convert between PDFs and images, or crop a passport photo, on your own computer.</p>
-              </div>
-            </header>
-
+        <div className="app-shell">
+          <a className="skip-link" href="#workspace">Skip to workspace</a>
+          <ToolNavigation selected={tool} onSelect={select} />
+          <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' ? 'workspace-wide' : ''}`}>
             <DesktopUpdates />
             <ProjectsPanel />
-
-            <div role="tablist" aria-label="Tool" className="mb-6 inline-flex flex-wrap rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800/70">
-              {TOOLS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  id={`tab-${t.id}`}
-                  aria-selected={tool === t.id}
-                  aria-controls={`panel-${t.id}`}
-                  onClick={() => select(t.id)}
-                  className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                    tool === t.id
-                      ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-zinc-100'
-                      : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <header className="workspace-heading">
+              <h1>{TOOL_DETAILS[tool].title}</h1>
+              <p>{TOOL_DETAILS[tool].description}</p>
+            </header>
 
             {/* All tools stay mounted so switching tabs keeps your files. */}
             <section id="panel-merge" role="tabpanel" aria-labelledby="tab-merge" hidden={tool !== 'merge'}>
@@ -138,9 +117,16 @@ export default function App() {
             <section id="panel-images" role="tabpanel" aria-labelledby="tab-images" hidden={tool !== 'images'}>
               <ImagesTool active={tool === 'images'} />
             </section>
+            {(['word', 'excel', 'powerpoint'] as const).map((kind) => <section key={kind} id={`panel-${kind}`} role="tabpanel" aria-labelledby={`tab-${kind}`} hidden={tool !== kind}>
+              <OfficeTool kind={kind} active={tool === kind} />
+            </section>)}
+            {(['png', 'jpg'] as const).map((kind) => <section key={kind} id={`panel-${kind}`} role="tabpanel" aria-labelledby={`tab-${kind}`} hidden={tool !== kind}>
+              <ImagesTool kind={kind} active={tool === kind} />
+            </section>)}
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />
             </section>
+            <footer className="workspace-footer"><LocalFilesNote /></footer>
           </main>
           <PdfPasswordDialog />
         </div>

@@ -1,6 +1,6 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useId, useRef, useState, type DragEvent } from 'react'
 import { FILE_KINDS, pickFiles, type FileKind } from '../lib/files'
-import { UploadIcon } from './icons'
+import { FileUploadIcon, UploadIcon } from './icons'
 
 type Props = {
   kind?: FileKind
@@ -11,8 +11,9 @@ type Props = {
 }
 
 export function Dropzone({ kind = 'pdf', multiple = false, compact = false, title, onFiles }: Props) {
-  const { accept: acceptTypes, one, many } = FILE_KINDS[kind]
+  const { accept: acceptTypes, one, many, formatHint } = FILE_KINDS[kind]
   const input = useRef<HTMLInputElement>(null)
+  const hintId = useId()
   const [dragging, setDragging] = useState(false)
   const [skipped, setSkipped] = useState(0)
 
@@ -34,6 +35,8 @@ export function Dropzone({ kind = 'pdf', multiple = false, compact = false, titl
       <button
         type="button"
         data-dropzone=""
+        aria-label={title}
+        aria-describedby={compact ? undefined : `${hintId} ${hintId}-formats`}
         onClick={() => input.current?.click()}
         onDragOver={(e) => {
           e.preventDefault()
@@ -41,17 +44,15 @@ export function Dropzone({ kind = 'pdf', multiple = false, compact = false, titl
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 ${
-          compact ? 'px-4 py-5' : 'px-6 py-14'
-        } ${
-          dragging
-            ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/30'
-            : 'border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-900'
-        }`}
+        className={`file-dropzone ${compact ? 'file-dropzone-compact' : ''} ${dragging ? 'is-dragging' : ''}`}
       >
-        <UploadIcon className={`text-zinc-400 ${compact ? 'size-5' : 'size-8'}`} />
-        <span className="font-medium text-zinc-800 dark:text-zinc-200">{title}</span>
-        {!compact && <span className="text-sm text-zinc-500">Drop {multiple ? many : one} here, or click to browse</span>}
+        {compact ? <UploadIcon className="dropzone-small-icon" /> : <FileUploadIcon className="dropzone-document" />}
+        <span className="dropzone-title">{title}</span>
+        {!compact && <>
+          <span id={hintId} className="dropzone-hint">Drag and drop {multiple ? many : one} here</span>
+          <span className="dropzone-browse" aria-hidden="true">Browse files</span>
+          <span id={`${hintId}-formats`} className="dropzone-formats">{formatHint}</span>
+        </>}
       </button>
       {skipped > 0 && (
         <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">

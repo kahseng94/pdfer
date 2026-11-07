@@ -20,6 +20,11 @@ export const TOOLS = [
   { id: 'pdf-images', label: 'PDF to images', takes: 'pdf' },
   { id: 'passwords', label: 'Passwords', takes: 'pdf' },
   { id: 'workflows', label: 'Workflows', takes: 'pdf' },
+  { id: 'word', label: 'Word to PDF', takes: 'word' },
+  { id: 'excel', label: 'Excel to PDF', takes: 'excel' },
+  { id: 'powerpoint', label: 'PowerPoint to PDF', takes: 'powerpoint' },
+  { id: 'png', label: 'PNG to PDF', takes: 'png' },
+  { id: 'jpg', label: 'JPG to PDF', takes: 'jpg' },
   { id: 'images', label: 'Images to PDF', takes: 'image' },
   { id: 'photo', label: 'Photo', takes: 'image' },
 ] as const satisfies readonly { id: string; label: string; takes: FileKind }[]

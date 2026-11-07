@@ -8,6 +8,7 @@ import type { PageLayout } from './organize'
 import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } from './documentTools'
 import type { MetadataChanges, MetadataSchema } from './metadata'
 import { validatePdfTarget } from './pdfTarget'
+import type { OfficeKind, OfficeStatus } from './office'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -190,6 +191,21 @@ export async function signPdf(file: File, edits: EditPayload[], images: File[], 
   const result = new File([edited], `${file.name.replace(/\.pdf$/i, '')}_signed.pdf`, { type: 'application/pdf' })
   rememberPdfPassword(result, pdfPassword(file))
   return result
+}
+
+export async function readOfficeStatus(signal?: AbortSignal): Promise<OfficeStatus> {
+  let response: Response
+  try { response = await fetch('/api/office/status', { signal, cache: 'no-store' }) }
+  catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
+  if (!response.ok) throw new Error(`Could not check LibreOffice (HTTP ${response.status}).`)
+  return response.json() as Promise<OfficeStatus>
+}
+
+export function officeToPdf(file: File, kind: OfficeKind, signal?: AbortSignal): Promise<File> {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('kind', kind)
+  return post('/api/office', body, `${file.name.replace(/\.[^.]+$/, '')}.pdf`, '', signal)
 }
 
 export function imagesToPdf(files: File[], layout?: ImagePdfLayout, signal?: AbortSignal): Promise<File> {

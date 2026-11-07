@@ -23,6 +23,14 @@ export const UploadIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const FileUploadIcon = (p: IconProps) => (
+  <svg viewBox="0 0 48 56" fill="none" aria-hidden="true" {...p}>
+    <path d="M8 2h21l11 11v38a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" fill="var(--ui-surface)" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M29 2v8a3 3 0 0 0 3 3h8" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M22 40V24m-6 6 6-6 6 6" stroke="var(--ui-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 export const GripIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="6" r="1" />
