@@ -20,6 +20,7 @@ static void emit(NSDictionary *value) {
 @property(nonatomic, copy) void (^updateReply)(SPUUserUpdateChoice);
 @property(nonatomic, copy) void (^installReply)(SPUUserUpdateChoice);
 @property(nonatomic, copy) void (^cancellation)(void);
+@property(nonatomic, strong) NSDictionary *pendingFailure;
 @property(nonatomic) uint64_t expected;
 @property(nonatomic) uint64_t received;
 @property(nonatomic) BOOL stopping;
@@ -58,7 +59,9 @@ static void emit(NSDictionary *value) {
     acknowledgement();
 }
 - (void)showUpdaterError:(NSError *)error acknowledgement:(void (^)(void))acknowledgement {
-    if (!self.stopping) emit(@{@"event": @"error", @"message": error.localizedDescription ?: @"Update failed."});
+    // Acknowledging the error starts teardown of the failed installation. Don't
+    // expose Retry until that cycle has finished, especially on slower machines.
+    if (!self.stopping) self.pendingFailure = @{@"event": @"error", @"message": error.localizedDescription ?: @"Update failed."};
     acknowledgement();
 }
 - (void)showDownloadInitiatedWithCancellation:(void (^)(void))cancellation {
@@ -95,9 +98,16 @@ static void emit(NSDictionary *value) {
 }
 - (void)updater:(SPUUpdater *)updater didFinishUpdateCycleForUpdateCheck:(SPUUpdateCheck)check error:(NSError *)error {
     if (self.stopping) emit(@{@"event": @"stopped"});
-    else if (self.pendingCheck) {
+    else {
+        NSDictionary *failure = self.pendingFailure;
+        self.pendingFailure = nil;
+        BOOL checkAgain = self.pendingCheck;
         self.pendingCheck = NO;
-        dispatch_async(dispatch_get_main_queue(), ^{ [self.updater checkForUpdates]; });
+        // Let Sparkle finish its own state reset after this delegate returns.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (failure) emit(failure);
+            if (checkAgain && !self.stopping) [self.updater checkForUpdates];
+        });
     }
 }
 - (void)cancel {
