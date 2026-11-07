@@ -190,6 +190,23 @@ button:not(:disabled), summary { cursor: pointer; }
   .ui-field { max-width: 100%; }
 }
 
+/* The macOS desktop window has no system title bar. Its window buttons float over
+   the top-left corner, and the top strip, the brand and the narrow header move the window. */
+.title-bar { display: none; }
+:root[data-title-bar="hidden"] { --title-bar-height: 40px; }
+[data-title-bar="hidden"] .title-bar { display: block; position: fixed; top: 0; right: 0; left: 248px; z-index: 30; height: var(--title-bar-height); background: var(--ui-background); }
+[data-title-bar="hidden"] :is(.title-bar, .app-brand, .mobile-navigation) { -webkit-app-region: drag; user-select: none; }
+[data-title-bar="hidden"] .mobile-tool-picker { -webkit-app-region: no-drag; }
+[data-title-bar="hidden"] .skip-link:focus { transform: translateY(var(--title-bar-height)); }
+@media (min-width: 1024px) {
+  [data-title-bar="hidden"] .app-brand { padding-top: calc(var(--title-bar-height) + 4px); }
+  [data-title-bar="hidden"] .workspace { padding-top: var(--title-bar-height); }
+}
+@media (max-width: 1023px) {
+  [data-title-bar="hidden"] .title-bar { left: 0; background: var(--ui-surface); }
+  [data-title-bar="hidden"] .mobile-navigation { padding-top: var(--title-bar-height); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-shell *, .app-shell *::before, .app-shell *::after {
     transition-duration: 0s !important;

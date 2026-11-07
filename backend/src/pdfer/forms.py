@@ -1,4 +1,9 @@
-"""AcroForm values and explicit widget appearances; no JavaScript or XFA execution."""
+"""AcroForm values and explicit widget appearances; no JavaScript or XFA execution.
+
+Hybrid XFA forms also carry a complete AcroForm field tree, so they are filled
+through that tree and saved without the XFA layer. Dynamic XFA forms have no
+usable AcroForm widgets and are rejected.
+"""
 import json
 import math
 import re
@@ -8,13 +13,21 @@ from pikepdf.form import Form
 
 from pdfer import core, fonts
 
+DYNAMIC_XFA = ("This is a dynamic XFA form, which only Adobe Acrobat or Reader can fill. "
+               "Fill it there, or export a standard PDF form from the source application.")
+
+
+def _has_xfa(pdf):
+    return "/XFA" in pdf.Root.get("/AcroForm", {})
+
 
 def _fields(pdf):
     acro = pdf.Root.get("/AcroForm")
     if acro is None:
         return Form(pdf), []
-    if "/XFA" in acro:
-        raise core.PdfToolError("XFA forms are not supported. Export a standard AcroForm PDF from the source application.")
+    xfa = "/XFA" in acro
+    if xfa and bool(pdf.Root.get("/NeedsRendering", False)):
+        raise core.PdfToolError(DYNAMIC_XFA)
     owned, visiting = set(), set()
     def walk(nodes, depth=0):
         if depth > 64: raise core.PdfToolError("This form has an excessively nested field tree.")
@@ -28,10 +41,15 @@ def _fields(pdf):
             walk(node.get("/Kids", []), depth + 1)
             visiting.remove(node.objgen)
     walk(acro.get("/Fields", []))
+    has_widgets = False
     for page in pdf.pages:
         for annot in page.get("/Annots", []):
-            if annot.get("/Subtype") == pikepdf.Name.Widget and annot.objgen not in owned:
-                raise core.PdfToolError("This PDF has form widgets missing from its field tree. Repair the form in its source application first.")
+            if annot.get("/Subtype") == pikepdf.Name.Widget:
+                if annot.objgen not in owned:
+                    raise core.PdfToolError("This PDF has form widgets missing from its field tree. Repair the form in its source application first.")
+                has_widgets = True
+    if xfa and not has_widgets:
+        raise core.PdfToolError(DYNAMIC_XFA)
     form = Form(pdf)
     fields = []
     def collect(nodes):
@@ -116,7 +134,7 @@ def _schema(pdf, form, fields):
 def read(data: bytes, name="file", password="") -> dict:
     with core._open(data, name, password) as pdf:
         form, fields = _fields(pdf)
-        return {"fields": _schema(pdf, form, fields), "pages": len(pdf.pages), "signed": _signed(pdf)}
+        return {"fields": _schema(pdf, form, fields), "pages": len(pdf.pages), "signed": _signed(pdf), "xfa": _has_xfa(pdf)}
 
 
 def _rgb(value, fallback):
@@ -268,4 +286,19 @@ def fill(data: bytes, spec: str, flatten=False, name="file", password="") -> byt
             pdf.flatten_annotations()
             for page, annotations in zip(pdf.pages, other): page.Annots = pikepdf.Array(annotations)
             if "/AcroForm" in pdf.Root: del pdf.Root.AcroForm
+        _drop_xfa_and_usage_rights(pdf)
         return core._save(pdf, password if pdf.is_encrypted else "", min_version="1.4")
+
+
+def _drop_xfa_and_usage_rights(pdf):
+    # Acrobat prefers XFA data over AcroForm values, so a kept XFA layer would
+    # show the old answers. Reader usage rights are signed over the original
+    # bytes; once the form is filled they are invalid and Reader shows an error.
+    acro = pdf.Root.get("/AcroForm")
+    if acro is not None and "/XFA" in acro: del acro.XFA
+    if "/NeedsRendering" in pdf.Root: del pdf.Root.NeedsRendering
+    perms = pdf.Root.get("/Perms")
+    if perms is not None:
+        for key in ("/UR", "/UR3"):
+            if key in perms: del perms[key]
+        if not perms.keys(): del pdf.Root.Perms

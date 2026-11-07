@@ -24,6 +24,9 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   png: { title: 'PNG to PDF', description: 'Arrange PNG images in order and choose the page size for your PDF.' },
   jpg: { title: 'JPG to PDF', description: 'Arrange JPEG photos in order and fit them to the PDF page size you choose.' },
   images: { title: 'Images to PDF', description: 'Turn your images into a PDF with the page size and layout you need.' },
+  'sheet-view': { title: 'View a spreadsheet', description: 'Browse and search an Excel workbook or CSV file, with values shown as Excel formats them.' },
+  'excel-csv': { title: 'Excel to CSV', description: 'Save a worksheet, or every sheet, as CSV text that other apps can import.' },
+  'csv-excel': { title: 'CSV to Excel', description: 'Turn CSV files into a workbook with real numbers and dates, one sheet per file.' },
   photo: { title: 'Passport photo', description: 'Crop and size a photo for a passport or visa.' },
 }
 

@@ -12,6 +12,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   api = {
+    titleBar: 'native',
     getUpdateState: vi.fn(async () => base), checkForUpdates: vi.fn(async () => base),
     downloadUpdate: vi.fn(async () => base), installUpdate: vi.fn(async () => true),
     onUpdateState: vi.fn((callback) => { update = callback; return vi.fn() }),

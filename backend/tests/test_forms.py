@@ -92,7 +92,7 @@ def test_invalid_values_do_not_silently_truncate_or_change_type(values):
     with pytest.raises(core.PdfToolError): forms.fill(source, json.dumps(values_for(source, values)))
 
 
-def test_rejects_orphan_widgets_xfa_and_unknown_ids():
+def test_rejects_orphan_widgets_and_unknown_ids():
     source = form_pdf()
     with pytest.raises(core.PdfToolError, match="could not be found"): forms.fill(source, '{"missing":"x"}')
     with pikepdf.open(BytesIO(source)) as pdf:
@@ -100,9 +100,51 @@ def test_rejects_orphan_widgets_xfa_and_unknown_ids():
         pdf.pages[0].Annots.append(ghost)
         with pytest.warns(pikepdf.PageCopyWarning): broken = core._save(pdf)
         with pytest.raises(core.PdfToolError, match="missing from its field tree"): forms.read(broken)
-    with pikepdf.open(BytesIO(source)) as pdf:
-        pdf.Root.AcroForm.XFA = pdf.make_stream(b"<xfa/>")
-        with pytest.raises(core.PdfToolError, match="XFA"): forms.read(core._save(pdf))
+
+
+def hybrid_xfa_pdf(source=None, **root):
+    with pikepdf.open(BytesIO(source or form_pdf())) as pdf:
+        # XFA may be one stream or an array of packet names and streams.
+        pdf.Root.AcroForm.XFA = pikepdf.Array(["template", pdf.make_stream(b"<template/>"), "datasets", pdf.make_stream(b"<xfa:datasets/>")])
+        pdf.Root.Perms = pikepdf.Dictionary(UR3=pikepdf.Dictionary(Type=pikepdf.Name.Sig, Filter=pikepdf.Name("/Adobe.PPKLite")))
+        for key, value in root.items(): pdf.Root[f"/{key}"] = value
+        return core._save(pdf)
+
+
+def test_hybrid_xfa_form_is_filled_through_its_acroform_fields():
+    source = hybrid_xfa_pdf(NeedsRendering=False)
+    schema = forms.read(source)
+    assert schema["xfa"] and not schema["signed"]
+    assert {field["name"] for field in schema["fields"]} >= {"name", "notes", "consent"}
+    for flatten in (False, True):
+        result = forms.fill(source, json.dumps(values_for(source, {"name": "Ada", "consent": True})), flatten)
+        with pikepdf.open(BytesIO(result)) as pdf:
+            assert "/XFA" not in pdf.Root.get("/AcroForm", {})
+            assert "/NeedsRendering" not in pdf.Root and "/Perms" not in pdf.Root
+            assert not pdf.check_pdf_syntax()
+        if not flatten:
+            filled = forms.read(result)
+            assert not filled["xfa"]
+            assert {field["name"]: field["value"] for field in filled["fields"]}["name"] == "Ada"
+    assert not forms.read(form_pdf())["xfa"]
+
+
+def test_dynamic_xfa_forms_are_rejected():
+    with pytest.raises(core.PdfToolError, match="dynamic XFA"): forms.read(hybrid_xfa_pdf(NeedsRendering=True))
+    with pikepdf.new() as pdf:
+        pdf.add_blank_page()
+        pdf.Root.AcroForm = pikepdf.Dictionary(Fields=pikepdf.Array(), XFA=pdf.make_stream(b"<xdp:xdp/>"))
+        empty = core._save(pdf)
+    with pytest.raises(core.PdfToolError, match="dynamic XFA"): forms.read(empty)
+    with pytest.raises(core.PdfToolError, match="dynamic XFA"): forms.fill(empty, '{}')
+
+
+def test_fill_drops_reader_usage_rights_but_keeps_other_permissions():
+    with pikepdf.open(BytesIO(form_pdf())) as pdf:
+        pdf.Root.Perms = pikepdf.Dictionary(UR3=pikepdf.Dictionary(Type=pikepdf.Name.Sig), Other=pikepdf.Name.Keep)
+        source = core._save(pdf)
+    with pikepdf.open(BytesIO(forms.fill(source, json.dumps(values_for(source, {"name": "Ada"}))))) as pdf:
+        assert "/UR3" not in pdf.Root.Perms and pdf.Root.Perms.Other == pikepdf.Name.Keep
 
 
 def test_existing_digital_signature_prevents_mutation():

@@ -7,6 +7,8 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('pdferDesktop', {
+  // main.cjs passes this flag when the window has no system title bar.
+  titleBar: process.argv.includes('--pdfer-hidden-title-bar') ? 'hidden' : 'native',
   getUpdateState: () => ipcRenderer.invoke('updates:state'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),

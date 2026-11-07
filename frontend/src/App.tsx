@@ -8,6 +8,9 @@ import { LocalFilesNote, ToolNavigation } from './components/ToolNavigation'
 import { focusToolNavigation, TOOL_DETAILS } from './lib/toolNavigation'
 import { ImagesTool } from './components/ImagesTool'
 import { OfficeTool } from './components/OfficeTool'
+import { ExcelCsvTool } from './components/ExcelCsvTool'
+import { SheetViewTool } from './components/SheetViewTool'
+import { CsvExcelTool } from './components/CsvExcelTool'
 import { MergeTool } from './components/MergeTool'
 import { OrganizeTool } from './components/OrganizeTool'
 import { PdfImagesTool } from './components/PdfImagesTool'
@@ -52,6 +55,7 @@ export default function App() {
     <HandoffContext value={{ delivery, send }}>
       <ProjectContext value={projects}>
         <div className="app-shell">
+          <div className="title-bar" aria-hidden="true" />
           <a className="skip-link" href="#workspace">Skip to workspace</a>
           <ToolNavigation selected={tool} onSelect={select} />
           <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' ? 'workspace-wide' : ''}`}>
@@ -123,6 +127,15 @@ export default function App() {
             {(['png', 'jpg'] as const).map((kind) => <section key={kind} id={`panel-${kind}`} role="tabpanel" aria-labelledby={`tab-${kind}`} hidden={tool !== kind}>
               <ImagesTool kind={kind} active={tool === kind} />
             </section>)}
+            <section id="panel-sheet-view" role="tabpanel" aria-labelledby="tab-sheet-view" hidden={tool !== 'sheet-view'}>
+              <SheetViewTool active={tool === 'sheet-view'} />
+            </section>
+            <section id="panel-excel-csv" role="tabpanel" aria-labelledby="tab-excel-csv" hidden={tool !== 'excel-csv'}>
+              <ExcelCsvTool active={tool === 'excel-csv'} />
+            </section>
+            <section id="panel-csv-excel" role="tabpanel" aria-labelledby="tab-csv-excel" hidden={tool !== 'csv-excel'}>
+              <CsvExcelTool active={tool === 'csv-excel'} />
+            </section>
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />
             </section>

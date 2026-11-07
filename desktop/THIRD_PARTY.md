@@ -6,7 +6,8 @@ Sparkle.framework. The pinned version and archive checksum are in
 The native bridge is compiled against Node-API headers (MIT).
 
 pdfer bundles Electron (MIT), electron-updater (MIT), CPython (PSF), and its
-Python PDF dependencies. Electron includes its LICENSE and LICENSES.chromium.html.
+Python dependencies, including openpyxl and et-xmlfile (MIT) for spreadsheets.
+Electron includes its LICENSE and LICENSES.chromium.html.
 Python package metadata and bundled DejaVu font licensing are retained with the
 backend. See the source distributions for each component's complete notices.
 

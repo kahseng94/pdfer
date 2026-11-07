@@ -5,7 +5,7 @@ export type FormField = {
   options: { value: string; label: string }[]; reason: string | null
   multiline?: boolean; maxLength?: number | null; editable?: boolean; allowEmpty?: boolean
 }
-export type FormSchema = { fields: FormField[]; pages: number; signed: boolean }
+export type FormSchema = { fields: FormField[]; pages: number; signed: boolean; xfa: boolean }
 export type BookmarkEntry = { id: string; sourceId: string | null; title: string; page: number | null; level: number }
 export type BookmarkSchema = { bookmarks: BookmarkEntry[]; pages: number }
 export type PdfSize = { width: number; height: number }

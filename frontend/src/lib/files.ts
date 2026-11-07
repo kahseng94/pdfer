@@ -1,8 +1,9 @@
 // Which files each tool takes. Shared by the Dropzone, window drops and paste.
 
 import { MAX_OFFICE_BYTES, OFFICE_FORMATS, type OfficeKind } from './office'
+import { MAX_CSV_BYTES, MAX_WORKBOOK_BYTES } from './spreadsheets'
 
-export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'compressible'
+export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'xlsx' | 'csv' | 'sheet' | 'compressible'
 
 type KindSpec = {
   /** The `accept` attribute for a file input. */
@@ -28,6 +29,19 @@ const IMAGE: KindSpec = {
   one: 'an image',
   many: 'images',
   is: (f) => f.type === 'image/jpeg' || f.type === 'image/png' || /\.(jpe?g|png)$/i.test(f.name),
+}
+
+/** Workbooks the spreadsheet tools read themselves, without LibreOffice. */
+const XLSX: KindSpec = {
+  accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12',
+  formatHint: `Excel workbooks (.xlsx, .xlsm) · Up to ${MAX_WORKBOOK_BYTES / (1024 * 1024)} MB`,
+  one: 'an Excel workbook', many: 'Excel workbooks', is: (f) => /\.xls[xm]$/i.test(f.name),
+}
+
+const CSV: KindSpec = {
+  accept: '.csv,.tsv,text/csv,text/tab-separated-values',
+  formatHint: `CSV and TSV files · Up to ${MAX_CSV_BYTES / (1024 * 1024)} MB in total`,
+  one: 'a CSV file', many: 'CSV files', is: (f) => /\.(csv|tsv)$/i.test(f.name),
 }
 
 function officeFormatHint(kind: OfficeKind) {
@@ -62,6 +76,13 @@ export const FILE_KINDS: Record<FileKind, KindSpec> = {
     accept: '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation',
     formatHint: officeFormatHint('powerpoint'),
     one: 'a PowerPoint presentation', many: 'PowerPoint presentations', is: (f) => /\.pptx?$/i.test(f.name),
+  },
+  xlsx: XLSX,
+  csv: CSV,
+  sheet: {
+    accept: `${XLSX.accept},${CSV.accept}`,
+    formatHint: `Excel workbooks (.xlsx, .xlsm) and CSV files (.csv, .tsv) · Up to ${MAX_WORKBOOK_BYTES / (1024 * 1024)} MB`,
+    one: 'a spreadsheet', many: 'spreadsheets', is: (f) => XLSX.is(f) || CSV.is(f),
   },
   /** What the Compress tool takes: a PDF, or pictures including WebP. */
   compressible: {

@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.143.3",
     "fonttools>=4.67.0",
     "img2pdf>=0.6.3",
+    "openpyxl>=3.1.5",
     "pikepdf>=10.17.0",
     "pillow>=13.0.0",
     "python-multipart>=0.0.32",

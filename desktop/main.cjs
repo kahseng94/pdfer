@@ -97,10 +97,16 @@ async function launch(options = {}) {
   session.defaultSession.on('will-download', (_event, item) => {
     item.setSaveDialogOptions({ title: 'Save exported file', defaultPath: path.join(app.getPath('downloads'), path.basename(item.getFilename())) })
   })
+  // On macOS the page draws its own top edge: the window buttons float over the
+  // sidebar, and the page marks where the window can be dragged.
+  const hiddenTitleBar = process.platform === 'darwin'
   window = new BrowserWindow({ title: 'pdfer', width: 1120, height: 900, minWidth: 720, minHeight: 600,
-    show: false, backgroundColor: '#fafafa', webPreferences: {
+    show: false, backgroundColor: '#fafafa',
+    ...(hiddenTitleBar ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 16, y: 13 } } : {}),
+    webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false,
       sandbox: true, webSecurity: true, spellcheck: false,
+      additionalArguments: hiddenTitleBar ? ['--pdfer-hidden-title-bar'] : [],
     } })
   const contents = window.webContents
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))

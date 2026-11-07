@@ -38,6 +38,7 @@ export function FormsTool({ active = true }: { active?: boolean }) {
     {task.file && !task.doc && task.error && <Button onClick={() => void open(task.file!)}>Retry opening</Button>}
     {schema && task.doc && <>
       {schema.signed && <ErrorMessage>This PDF contains a digital signature. Use an unsigned copy before filling or flattening it.</ErrorMessage>}
+      {schema.xfa && !schema.signed && <p role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">This form also contains Adobe XFA data. The filled copy is saved as a standard PDF form, so Adobe-only scripts and checks in the original are not kept.</p>}
       {!schema.fields.length && <p role="status" className="rounded-lg border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-800">No fillable fields were found. Use the Edit tab to place text on a flat form.</p>}
       <fieldset disabled={task.busy || schema.signed} className="space-y-4 disabled:opacity-60">
         <legend className="sr-only">PDF form values</legend>
