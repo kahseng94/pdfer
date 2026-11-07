@@ -4,7 +4,7 @@ import type { Element } from './edits'
 type History<T> = { past: T[][]; present: T[]; future: T[][] }
 
 /** A drag is one undo step: begin, any number of changes, end. */
-export function useEditHistory<T extends Element = Element>() {
+export function useEditHistory<T extends { id: string } = Element>() {
   const [history, setHistory] = useState<History<T>>({ past: [], present: [], future: [] })
   const push = (state: History<T>) => [...state.past.slice(-99), state.present]
   const begin = useCallback(() => setHistory((state) => ({ past: push(state), present: state.present, future: [] })), [])

@@ -178,3 +178,144 @@ def test_existing_multiline_carriage_returns_render_as_lines_without_changing_th
         field = next(field for field in pdf.Root.AcroForm.Fields if field.get('/T') == 'notes')
         assert field.V == 'First\rSecond'
         assert sum(str(operator) == 'Tj' for _, operator in pikepdf.parse_content_stream(field.AP.N)) == 2
+
+
+def blank_pdf(pages=1, password=""):
+    with pikepdf.new() as pdf:
+        for _ in range(pages): pdf.add_blank_page(page_size=(612, 792))
+        return core._save(pdf, password)
+
+
+def new_field(kind="text", name="Field", page=1, x=50, y=50, width=200, height=24, **extra):
+    return {"type": kind, "name": name, "page": page, "x": x, "y": y, "width": width, "height": height, **extra}
+
+
+EVERY_TYPE = [
+    new_field("text", "Full name", label="Your full name", required=True, maxLength=40),
+    new_field("text", "Notes", y=90, width=300, height=80, multiline=True),
+    new_field("checkbox", "Agree", y=190, width=14, height=14),
+    new_field("choice", "Country", y=220, width=150, height=22, options=["Canada", "France"], editable=True),
+    new_field("radio", "Plan", y=260, width=14, height=14, option="Basic plan"),
+    new_field("radio", "Plan", x=100, y=260, width=14, height=14, option="Pro", required=True),
+]
+
+
+def test_create_adds_each_field_type_that_fill_forms_can_then_fill():
+    result = forms.create(blank_pdf(), json.dumps(EVERY_TYPE))
+    fields = {field["name"]: field for field in forms.read(result)["fields"]}
+    assert {name: field["type"] for name, field in fields.items()} == {"Full name": "text", "Notes": "text", "Agree": "checkbox", "Country": "choice", "Plan": "radio"}
+    assert fields["Full name"].items() >= {"label": "Your full name", "required": True, "maxLength": 40, "multiline": False, "value": ""}.items()
+    assert fields["Notes"]["multiline"] and fields["Country"]["editable"]
+    assert [option["value"] for option in fields["Country"]["options"]] == ["Canada", "France"]
+    assert [option["value"] for option in fields["Plan"]["options"]] == ["Basic plan", "Pro"]
+    assert fields["Plan"]["required"] and not fields["Plan"]["allowEmpty"] and fields["Agree"]["value"] is False
+    assert fields["Notes"]["boxes"] == [{"page": 1, "x": 50, "y": 90, "width": 300, "height": 80}]
+    with pikepdf.open(BytesIO(result)) as pdf:
+        assert not pdf.check_pdf_syntax()
+        assert len(pdf.pages) == 1 and len(pdf.pages[0].Annots) == 6
+        assert set(pdf.Root.AcroForm.DR.Font.keys()) == {"/Helv", "/ZaDb"} and pdf.Root.AcroForm.DA == "/Helv 0 Tf 0 g"
+        for annot in pdf.pages[0].Annots:
+            assert annot.Subtype == pikepdf.Name.Widget and annot.F == 4 and annot.P.objgen == pdf.pages[0].objgen
+            assert isinstance(annot.AP.N, pikepdf.Stream) or set(annot.AP.N.keys()) >= {"/Off"}
+    ids = {name: field["id"] for name, field in fields.items()}
+    wanted = {"Full name": "Zoë", "Notes": "a\nb", "Agree": True, "Country": "Peru", "Plan": "Pro"}
+    filled = forms.fill(result, json.dumps({ids[name]: value for name, value in wanted.items()}))
+    assert {field["name"]: field["value"] for field in forms.read(filled)["fields"]} == wanted
+    flat = forms.fill(result, json.dumps({ids["Agree"]: True}), True)
+    with pikepdf.open(BytesIO(flat)) as pdf: assert "/AcroForm" not in pdf.Root and not pdf.pages[0].get("/Annots")
+
+
+def test_create_keeps_existing_fields_values_and_resources():
+    source = form_pdf()
+    before = {field["name"]: field["value"] for field in forms.read(source)["fields"]}
+    result = forms.create(source, json.dumps([new_field("text", "Email", page=2, y=700)]))
+    after = {field["name"]: field for field in forms.read(result)["fields"]}
+    assert {name: after[name]["value"] for name in before} == before
+    assert after["Email"]["pages"] == [2]
+    with pikepdf.open(BytesIO(source)) as original, pikepdf.open(BytesIO(result)) as pdf:
+        assert pdf.Root.AcroForm.DR.Font.Helv.BaseFont == pikepdf.Name.Helvetica and "/ZaDb" in pdf.Root.AcroForm.DR.Font
+        notes = next(field for field in pdf.Root.AcroForm.Fields if field.get("/T") == "notes")
+        assert "/AP" not in notes and len(pdf.pages[0].Annots) == len(original.pages[0].Annots)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("unit", [1, 2])
+def test_create_places_fields_where_they_were_drawn_on_rotated_cropped_pages(rotation, unit):
+    with pikepdf.new() as pdf:
+        page = pdf.add_blank_page(page_size=(400, 500))
+        page.MediaBox, page.CropBox, page.Rotate, page.UserUnit = [-20, -30, 380, 470], [20, 30, 320, 430], rotation, unit
+        source = core._save(pdf)
+    box = {"x": 40, "y": 20, "width": 100, "height": 60}
+    result = forms.create(source, json.dumps([new_field("text", "Name", **box)]))
+    assert forms.read(result)["fields"][0]["boxes"] == [{"page": 1, **box}]
+    with pikepdf.open(BytesIO(result)) as pdf:
+        widget = pdf.pages[0].Annots[0]
+        assert widget.MK.R == rotation
+        if rotation == 90 and unit == 2:
+            # Display (20, 260)-(70, 290) in the frame, rotated into the crop box at (320, 30).
+            assert [float(v) for v in widget.Rect] == [30, 50, 60, 100]
+
+
+def test_create_orders_new_fields_by_reading_position():
+    spec = [new_field("text", "Bottom", y=500), new_field("text", "Right", x=300, y=100), new_field("text", "Left", x=50, y=100), new_field("text", "Page two", page=2)]
+    result = forms.create(blank_pdf(2), json.dumps(spec))
+    assert [field["name"] for field in forms.read(result)["fields"]] == ["Left", "Right", "Bottom", "Page two"]
+
+
+@pytest.mark.parametrize(("spec", "message"), [
+    ("not json", "valid JSON"),
+    ("[]", "1 to 500"),
+    (json.dumps([new_field("signature")]), '"type" must be one of'),
+    (json.dumps([new_field(name=" ")]), "name must be 1–100"),
+    (json.dumps([new_field(name="a.b")]), 'cannot contain "."'),
+    (json.dumps([new_field(name="tab\there")]), "control characters"),
+    (json.dumps([new_field(page=2)]), "outside pages"),
+    (json.dumps([new_field(x=500)]), "fit inside page 1"),
+    (json.dumps([new_field(width=7)]), "at least 8 points"),
+    (json.dumps([new_field(maxLength=0)]), "maximum length"),
+    (json.dumps([new_field("choice", options=[])]), "1 to 100 options"),
+    (json.dumps([new_field("choice", options=["A", "A"])]), "different from each other"),
+    (json.dumps([new_field("radio", option="A")]), "at least 2 buttons"),
+    (json.dumps([new_field("radio", option="A"), new_field("radio", option="A", y=100)]), "same option"),
+    (json.dumps([new_field("radio", option="Off"), new_field("radio", option="On", y=100)]), "reserved"),
+    (json.dumps([new_field(), new_field(y=100)]), "already named"),
+    (json.dumps([new_field("radio", option="A"), new_field("radio", option="B", y=100), new_field(y=150)]), "already named"),
+])
+def test_create_rejects_invalid_fields(spec, message):
+    with pytest.raises(core.PdfToolError, match=message): forms.create(blank_pdf(), spec)
+
+
+def test_create_rejects_names_already_in_the_pdf_and_too_many_fields():
+    source = form_pdf()
+    with pytest.raises(core.PdfToolError, match='already has a field named "notes"'): forms.create(source, json.dumps([new_field(name="notes")]))
+    with pytest.raises(core.PdfToolError, match="at most 500 fields"):
+        forms.create(source, json.dumps([new_field("checkbox", f"Box {i}", width=10, height=10) for i in range(495)]))
+
+
+def test_create_refuses_signed_pdfs_drops_xfa_and_keeps_the_password():
+    with pikepdf.open(BytesIO(form_pdf())) as pdf:
+        pdf.Root.AcroForm.Fields.append(pdf.make_indirect(pikepdf.Dictionary(FT=pikepdf.Name.Sig, T="signature", V=pikepdf.Dictionary(Type=pikepdf.Name.Sig))))
+        signed = core._save(pdf)
+    with pytest.raises(core.PdfToolError, match="digital signature"): forms.create(signed, json.dumps([new_field()]))
+    with pikepdf.open(BytesIO(forms.create(hybrid_xfa_pdf(NeedsRendering=False), json.dumps([new_field(name="Email")])))) as pdf:
+        assert "/XFA" not in pdf.Root.AcroForm and "/Perms" not in pdf.Root
+    protected = forms.create(blank_pdf(password="secret"), json.dumps([new_field()]), password="secret")
+    with pytest.raises(pikepdf.PasswordError): pikepdf.open(BytesIO(protected))
+    assert forms.read(protected, password="secret")["fields"][0]["name"] == "Field"
+
+
+def test_api_form_create():
+    response = TestClient(app).post('/api/forms/create', files={'file': ('flat.pdf', blank_pdf(), 'application/pdf')}, data={'fields': json.dumps(EVERY_TYPE)})
+    assert response.status_code == 200
+    assert 'flat_form.pdf' in response.headers['content-disposition']
+    assert len(forms.read(response.content)['fields']) == 5
+    bad = TestClient(app).post('/api/forms/create', files={'file': ('flat.pdf', blank_pdf(), 'application/pdf')}, data={'fields': '[]'})
+    assert bad.status_code == 400 and "1 to 500" in bad.json()['detail']
+
+
+def test_read_reports_where_each_widget_is_and_which_option_it_turns_on():
+    fields = {field["name"]: field for field in forms.read(form_pdf())["fields"]}
+    assert fields["name"]["boxes"] == [{"page": 1, "x": 30, "y": 112, "width": 270, "height": 30}, {"page": 2, "x": 30, "y": 112, "width": 270, "height": 30}]
+    assert [box["option"] for box in fields["plan"]["boxes"]] == ["alpha", "beta"]
+    assert fields["consent"]["boxes"] == [{"page": 1, "x": 30, "y": 372, "width": 20, "height": 20, "option": "Yes"}]
+    assert "option" not in fields["country"]["boxes"][0]

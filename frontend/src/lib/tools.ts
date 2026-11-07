@@ -13,6 +13,7 @@ export const TOOLS = [
   { id: 'ocr', label: 'OCR', takes: 'pdf' },
   { id: 'edit', label: 'Edit', takes: 'pdf' },
   { id: 'forms', label: 'Fill forms', takes: 'pdf' },
+  { id: 'form-builder', label: 'Create form', takes: 'pdf' },
   { id: 'redact', label: 'Redact', takes: 'pdf' },
   { id: 'signatures', label: 'Signatures', takes: 'pdf' },
   { id: 'stamps', label: 'Numbers & watermarks', takes: 'pdf' },

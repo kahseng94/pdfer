@@ -26,6 +26,7 @@ import { OcrTool } from './components/OcrTool'
 import { WorkflowTool } from './components/WorkflowTool'
 import { BookmarksTool } from './components/BookmarksTool'
 import { MetadataTool } from './components/MetadataTool'
+import { FormBuilderTool } from './components/FormBuilderTool'
 import { FormsTool } from './components/FormsTool'
 import { RedactTool } from './components/RedactTool'
 import { ProjectsPanel } from './components/ProjectsPanel'
@@ -97,6 +98,9 @@ export default function App() {
             </section>
             <section id="panel-forms" role="tabpanel" aria-labelledby="tab-forms" hidden={tool !== 'forms'}>
               <FormsTool active={tool === 'forms'} />
+            </section>
+            <section id="panel-form-builder" role="tabpanel" aria-labelledby="tab-form-builder" hidden={tool !== 'form-builder'}>
+              <FormBuilderTool active={tool === 'form-builder'} />
             </section>
             <section id="panel-redact" role="tabpanel" aria-labelledby="tab-redact" hidden={tool !== 'redact'}>
               <RedactTool active={tool === 'redact'} />

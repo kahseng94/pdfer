@@ -104,6 +104,11 @@ def fill_forms(file: UploadFile, values: Annotated[str, Form()], flatten: Annota
     return _download(forms.fill(file.file.read(), values, flatten, file.filename or "document.pdf", password), f"{_stem(file.filename)}_filled.pdf", "application/pdf")
 
 
+@app.post("/api/forms/create")
+def create_forms(file: UploadFile, fields: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
+    return _download(forms.create(file.file.read(), fields, file.filename or "document.pdf", password), f"{_stem(file.filename)}_form.pdf", "application/pdf")
+
+
 @app.post("/api/bookmarks/read")
 def read_bookmarks(file: UploadFile, password: Annotated[str, Form()] = "") -> Response:
     return JSONResponse(bookmarks.read(file.file.read(), file.filename or "document.pdf", password), headers={"Cache-Control": "no-store"})

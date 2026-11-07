@@ -1,5 +1,9 @@
 """AcroForm values and explicit widget appearances; no JavaScript or XFA execution.
 
+`create` adds new text, checkbox, dropdown and radio fields to a PDF, with
+appearances written out so every viewer shows them, and leaves existing fields
+untouched. `read` and `fill` work on the fields a PDF has.
+
 Hybrid XFA forms also carry a complete AcroForm field tree, so they are filled
 through that tree and saved without the XFA layer. Dynamic XFA forms have no
 usable AcroForm widgets and are rejected.
@@ -100,9 +104,31 @@ def _signed(pdf):
     return False
 
 
-def _description(form, name, field, index, page_map):
+def _frames(pdf):
+    """For each page, what maps PDF user space back to display points (top-left origin, y down)."""
+    frames = []
+    for page in pdf.pages:
+        frame, _, height = core._display_frame(page)
+        frames.append((pikepdf.Matrix(*frame).inverse(), height, core._region_unit(page)))
+    return frames
+
+
+def _display_box(frame, rect):
+    inverse, height, unit = frame
+    box = inverse.transform(pikepdf.Rectangle(*rect))
+    return {"x": round(box.llx * unit, 2), "y": round((height - box.ury) * unit, 2),
+            "width": round(box.width * unit, 2), "height": round(box.height * unit, 2)}
+
+
+def _description(form, name, field, index, page_map, frames):
     widgets = _widgets(form, field)
     label = str(field.alternate_name or name or f"Field {index + 1}")
+    placed = []
+    for widget in widgets:
+        rect = core._box(widget.get("/Rect"))
+        if widget.objgen in page_map and rect is not None:
+            number = page_map[widget.objgen]
+            placed.append(({"page": number, **_display_box(frames[number - 1], rect)}, widget))
     item = {"id": f"field-{index}", "name": name or label, "label": label,
             "pages": sorted({page_map[w.objgen] for w in widgets if w.objgen in page_map}),
             "required": field.is_required, "readOnly": field.is_read_only, "type": "unsupported", "value": "", "options": [], "reason": None}
@@ -123,12 +149,20 @@ def _description(form, name, field, index, page_map):
         item.update(readOnly=True, reason="This field type is not editable here.")
     elif not widgets:
         item.update(readOnly=True, reason="This field has no page widget.")
+    if item["type"] in ("checkbox", "radio"):
+        # Each checkbox or radio button widget turns on one state; say which, so it can be clicked on the page.
+        for box, widget in placed:
+            appearances = widget.get("/AP", {}).get("/N")
+            states = [str(key)[1:] for key in appearances.keys() if str(key) != "/Off"] if isinstance(appearances, pikepdf.Dictionary) else []
+            if len(states) == 1: box["option"] = states[0]
+    item["boxes"] = sorted((box for box, _ in placed), key=lambda box: (box["page"], box["y"], box["x"]))
     return item
 
 
 def _schema(pdf, form, fields):
     page_map = {annot.objgen: index + 1 for index, page in enumerate(pdf.pages) for annot in page.get("/Annots", [])}
-    return [_description(form, name, field, index, page_map) for index, (name, field) in enumerate(fields)]
+    frames = _frames(pdf)
+    return [_description(form, name, field, index, page_map, frames) for index, (name, field) in enumerate(fields)]
 
 
 def read(data: bytes, name="file", password="") -> dict:
@@ -211,10 +245,15 @@ def _appearance(pdf, painter, widget, text, multiline=False, comb=None, align=0)
     ops.append(core._op("Q"))
     appearance = pdf.make_stream(pikepdf.unparse_content_stream(ops), Type=pikepdf.Name.XObject, Subtype=pikepdf.Name.Form,
                                  BBox=[0, 0, width, height], Resources=page.Resources)
+    _rotate(appearance, rotation, width, height)
+    widget.AP = pikepdf.Dictionary(N=appearance)
+
+
+def _rotate(appearance, rotation, width, height):
+    # width and height are the upright appearance's, already swapped for 90 and 270.
     if rotation == 90: appearance.Matrix = [0, 1, -1, 0, height, 0]
     elif rotation == 180: appearance.Matrix = [-1, 0, 0, -1, width, height]
     elif rotation == 270: appearance.Matrix = [0, -1, 1, 0, 0, width]
-    widget.AP = pikepdf.Dictionary(N=appearance)
 
 
 def fill(data: bytes, spec: str, flatten=False, name="file", password="") -> bytes:
@@ -286,6 +325,186 @@ def fill(data: bytes, spec: str, flatten=False, name="file", password="") -> byt
             pdf.flatten_annotations()
             for page, annotations in zip(pdf.pages, other): page.Annots = pikepdf.Array(annotations)
             if "/AcroForm" in pdf.Root: del pdf.Root.AcroForm
+        _drop_xfa_and_usage_rights(pdf)
+        return core._save(pdf, password if pdf.is_encrypted else "", min_version="1.4")
+
+
+_TYPES = ("text", "checkbox", "choice", "radio")
+_REQUIRED, _MULTILINE, _NO_TOGGLE_OFF, _RADIO, _COMBO, _EDIT = 1 << 1, 1 << 12, 1 << 14, 1 << 15, 1 << 17, 1 << 18
+_BORDER = (0.55, 0.55, 0.55)
+_MIN_FIELD = 8
+
+
+def _plain(value, label, low, high):
+    if not isinstance(value, str):
+        raise core.PdfToolError(f"{label} must be text.")
+    value = value.strip()
+    if not low <= len(value) <= high:
+        raise core.PdfToolError(f"{label} must be {low}–{high} characters." if low else f"{label} must be at most {high} characters.")
+    if any(ord(ch) < 32 or 0x7F <= ord(ch) < 0xA0 for ch in value):
+        raise core.PdfToolError(f"{label} cannot contain control characters.")
+    return value
+
+
+def _new_fields(spec, pdf, taken, existing):
+    try: items = json.loads(spec)
+    except ValueError: raise core.PdfToolError("Form fields must be valid JSON.") from None
+    if not isinstance(items, list) or not 1 <= len(items) <= 500:
+        raise core.PdfToolError("Provide a list of 1 to 500 form fields.")
+    frames, entries = {}, []
+    for index, item in enumerate(items, 1):
+        label = f"Field {index}"
+        f = core._Fields(item, label)
+        kind = f.choice("type", _TYPES)
+        name = _plain(f._raw("name"), f"{label}: the name", 1, 100)
+        if "." in name: raise core.PdfToolError(f'{label}: field names cannot contain ".".')
+        number = f.page(len(pdf.pages))
+        page = pdf.pages[number - 1]
+        x, y, w, h = (f.num(key) for key in ("x", "y", "width", "height"))
+        if number not in frames: frames[number] = (*core._display_frame(page), core._region_unit(page))
+        frame, width, height, unit = frames[number]
+        if min(x, y) < 0 or min(w, h) < _MIN_FIELD or x + w > width * unit + 0.02 or y + h > height * unit + 0.02:
+            raise core.PdfToolError(f"{label} must fit inside page {number} and be at least {_MIN_FIELD} points wide and high.")
+        rect = pikepdf.Matrix(*frame).transform(pikepdf.Rectangle(x / unit, height - (y + h) / unit, (x + w) / unit, height - y / unit))
+        entry = {"label": label, "kind": kind, "name": name, "page": page, "number": number, "x": x, "y": y,
+                 "rect": [round(v, 3) for v in (rect.llx, rect.lly, rect.urx, rect.ury)], "rotation": page.rotation,
+                 "required": f.flag("required"),
+                 "tooltip": "" if item.get("label") in (None, "") else _plain(item["label"], f"{label}: the label", 0, 200)}
+        if kind == "text":
+            max_length = item.get("maxLength")
+            if max_length is not None and (type(max_length) is not int or not 1 <= max_length <= 5000):
+                raise core.PdfToolError(f"{label}: the maximum length must be a whole number from 1 to 5000.")
+            entry.update(multiline=f.flag("multiline"), max_length=max_length)
+        elif kind == "choice":
+            options = item.get("options")
+            if not isinstance(options, list) or not 1 <= len(options) <= 100:
+                raise core.PdfToolError(f"{label}: a dropdown needs 1 to 100 options.")
+            options = [_plain(option, f"{label}: each option", 1, 200) for option in options]
+            if len(set(options)) != len(options): raise core.PdfToolError(f"{label}: dropdown options must be different from each other.")
+            entry.update(options=options, editable=f.flag("editable"))
+        elif kind == "radio":
+            option = _plain(f._raw("option"), f"{label}: the option", 1, 60)
+            if option == "Off": raise core.PdfToolError(f'{label}: "Off" is reserved; choose another option name.')
+            entry["option"] = option
+        entries.append(entry)
+    singles, groups = set(), {}
+    for entry in entries:
+        name = entry["name"]
+        if name in taken: raise core.PdfToolError(f'{entry["label"]}: this PDF already has a field named "{name}".')
+        if (name in singles) or (entry["kind"] != "radio" and name in groups):
+            raise core.PdfToolError(f'{entry["label"]}: another new field is already named "{name}".')
+        if entry["kind"] == "radio": groups.setdefault(name, []).append(entry)
+        else: singles.add(name)
+    for name, buttons in groups.items():
+        if len(buttons) < 2: raise core.PdfToolError(f'Radio group "{name}" needs at least 2 buttons.')
+        options = [button["option"] for button in buttons]
+        if len(set(options)) != len(options): raise core.PdfToolError(f'Radio group "{name}" has two buttons with the same option.')
+    if existing + len(singles) + len(groups) > 500:
+        raise core.PdfToolError(f"A form can have at most 500 fields. This PDF already has {existing}.")
+    # Viewers tab through fields in this order, so follow the reading order rather than the drawing order.
+    return sorted(entries, key=lambda entry: (entry["number"], round(entry["y"]), entry["x"]))
+
+
+def _acroform(pdf):
+    if "/AcroForm" not in pdf.Root: pdf.Root.AcroForm = pikepdf.Dictionary()
+    acro = pdf.Root.AcroForm
+    if "/Fields" not in acro: acro.Fields = pikepdf.Array()
+    if "/DA" not in acro: acro.DA = pikepdf.String("/Helv 0 Tf 0 g")
+    if "/DR" not in acro: acro.DR = pikepdf.Dictionary()
+    if "/Font" not in acro.DR: acro.DR.Font = pikepdf.Dictionary()
+    for key, font in (("/Helv", "/Helvetica"), ("/ZaDb", "/ZapfDingbats")):
+        if key not in acro.DR.Font:
+            acro.DR.Font[key] = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name(font)))
+    return acro
+
+
+def _toggle_appearance(pdf, widget, radio, on):
+    rect = core._box(widget.Rect)
+    width, height = rect[2] - rect[0], rect[3] - rect[1]
+    rotation = int(widget.MK.get("/R", 0)) % 360
+    if rotation in (90, 270): width, height = height, width
+    side = min(width, height)
+    ops = [core._op("q")]
+    border = _rgb(widget.MK.get("/BC"), None)
+    if radio:
+        cx, cy, radius = width / 2, height / 2, side / 2 - .5
+        if border: ops += [core._op("RG", *border), core._op("w", .6), *core._ellipse(cx, cy, radius, radius), core._op("S")]
+        if on: ops += [core._op("rg", 0, 0, 0), *core._ellipse(cx, cy, radius * .5, radius * .5), core._op("f")]
+    else:
+        if border: ops += [core._op("RG", *border), core._op("w", .6), core._op("re", .3, .3, width - .6, height - .6), core._op("S")]
+        if on:
+            left, bottom = (width - side) / 2, (height - side) / 2
+            tick = [(.22, .52), (.42, .3), (.78, .72)]
+            ops += [core._op("RG", 0, 0, 0), core._op("w", side * .1), core._op("J", 1), core._op("j", 1),
+                    core._op("m", left + tick[0][0] * side, bottom + tick[0][1] * side),
+                    *[core._op("l", left + tx * side, bottom + ty * side) for tx, ty in tick[1:]], core._op("S")]
+    ops.append(core._op("Q"))
+    appearance = pdf.make_stream(pikepdf.unparse_content_stream(ops), Type=pikepdf.Name.XObject, Subtype=pikepdf.Name.Form,
+                                 BBox=[0, 0, width, height], Resources=pikepdf.Dictionary())
+    _rotate(appearance, rotation, width, height)
+    return appearance
+
+
+def create(data: bytes, spec: str, name="file", password="") -> bytes:
+    """Add new fields; the PDF's existing fields, values and appearances are left as they are."""
+    with core._open(data, name, password) as pdf:
+        if _signed(pdf):
+            raise core.PdfToolError("This PDF contains a digital signature. Use an unsigned copy before adding form fields.")
+        _form, fields = _fields(pdf)
+        top = pdf.Root.get("/AcroForm", {}).get("/Fields", [])
+        taken = {field_name for field_name, _ in fields} | {str(node.T) for node in top if "/T" in node}
+        entries = _new_fields(spec, pdf, taken, len(fields))
+        acro = _acroform(pdf)
+        original_pages = len(pdf.pages)
+        painter = core._Painter(pdf, ())
+        groups = {}
+        for entry in entries:
+            kind = entry["kind"]
+            widget = pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget, Rect=entry["rect"], P=entry["page"].obj, F=4,
+                MK=pikepdf.Dictionary(BC=list(_BORDER), R=entry["rotation"]), BS=pikepdf.Dictionary(W=1, S=pikepdf.Name.S)))
+            flags = _REQUIRED if entry["required"] else 0
+            if kind in ("checkbox", "radio"):
+                on_state = entry["option"] if kind == "radio" else "Yes"
+                states = pikepdf.Dictionary(Off=_toggle_appearance(pdf, widget, kind == "radio", False))
+                states["/" + on_state] = _toggle_appearance(pdf, widget, kind == "radio", True)
+                widget.AP = pikepdf.Dictionary(N=states)
+                widget.AS = pikepdf.Name.Off
+                widget.DA = pikepdf.String("/ZaDb 0 Tf 0 g")
+                widget.MK.CA = pikepdf.String("l" if kind == "radio" else "4")
+            if kind == "radio":
+                group = groups.get(entry["name"])
+                if group is None:
+                    group = groups[entry["name"]] = pdf.make_indirect(pikepdf.Dictionary(
+                        FT=pikepdf.Name.Btn, T=pikepdf.String(entry["name"]), Ff=_RADIO | _NO_TOGGLE_OFF, V=pikepdf.Name.Off, Kids=pikepdf.Array()))
+                    acro.Fields.append(group)
+                group.Ff = int(group.Ff) | flags
+                if entry["tooltip"] and "/TU" not in group: group.TU = pikepdf.String(entry["tooltip"])
+                widget.Parent = group
+                group.Kids.append(widget)
+            else:
+                widget.T = pikepdf.String(entry["name"])
+                if entry["tooltip"]: widget.TU = pikepdf.String(entry["tooltip"])
+                if kind == "checkbox":
+                    widget.FT, widget.V = pikepdf.Name.Btn, pikepdf.Name.Off
+                else:
+                    widget.DA, widget.V = pikepdf.String("/Helv 0 Tf 0 g"), pikepdf.String("")
+                    if kind == "text":
+                        widget.FT = pikepdf.Name.Tx
+                        if entry["multiline"]: flags |= _MULTILINE
+                        if entry["max_length"]: widget.MaxLen = entry["max_length"]
+                    else:
+                        widget.FT = pikepdf.Name.Ch
+                        flags |= _COMBO | (_EDIT if entry["editable"] else 0)
+                        widget.Opt = pikepdf.Array([pikepdf.String(option) for option in entry["options"]])
+                    _appearance(pdf, painter, widget, "", entry.get("multiline", False))
+                if flags: widget.Ff = flags
+                acro.Fields.append(widget)
+            page = entry["page"]
+            if "/Annots" not in page.obj: page.obj.Annots = pikepdf.Array()
+            page.obj.Annots.append(widget)
+        painter.finish()
+        del pdf.pages[original_pages:]
         _drop_xfa_and_usage_rights(pdf)
         return core._save(pdf, password if pdf.is_encrypted else "", min_version="1.4")
 

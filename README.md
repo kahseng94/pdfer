@@ -187,8 +187,13 @@ across pages share one value, and every associated widget is updated.
 Read-only and unsupported fields are clearly marked. Required labels are
 informational; partially completed forms can be saved.
 
-**Show page** opens the original page for context. **Preview filled PDF**
-generates the actual output before download. The copy stays interactive
+Fields can be filled where they are on the page: each editable field gets
+an input laid over it (type in text boxes, tick checkboxes, click radio
+buttons, open dropdowns), and the list beside the page shows the same
+answers, so either can be used. Read-only and unsupported fields stay as
+the PDF draws them. **Show on page** turns to a field's page and puts the
+cursor in it. **Preview filled PDF** generates the actual output before
+download. The copy stays interactive
 by default. Enable **Flatten form fields** to make fields static while
 retaining other annotations and links. Text appearances use embedded sans
 fonts and fit within each field; a value that cannot fit is rejected rather
@@ -199,8 +204,35 @@ XFA, multiselect choices, password/file-select/rich-text fields, and digital
 signing are not supported. PDFs with existing digital signatures must be
 replaced by an unsigned copy before filling or flattening. Malformed form
 trees are rejected rather than guessed at. Protected inputs retain their
-opening password. This tool fills existing fields; use **Edit** to place
-text on a flat form.
+opening password. This tool fills existing fields; use **Create form** to
+make a flat PDF fillable, or **Edit** to place plain text on it.
+
+### Create form fields
+
+Use **Create form** to make a flat PDF fillable. Choose a field type and
+drag a box on the page: single-line or multiline text (with an optional
+maximum length), checkbox, dropdown (one option per line, optionally
+accepting custom text) or radio group. A radio group is one box per
+button; buttons sharing a group name belong together, and each has its
+own option value. Every field has a name, which must be unique and cannot
+contain a full stop, an optional label shown to the person filling it, and
+a required flag. Fields can be moved, resized, deleted and undone.
+
+New fields are saved in reading order, top to bottom and left to right,
+which is the order viewers tab through them. Each gets a thin grey border
+and appearances written into the PDF, so it shows in every viewer, and
+the saved copy is a standard AcroForm that **Fill forms**, Acrobat,
+Preview and browsers can fill. Fields line up with what you drew on
+rotated and cropped pages too.
+
+If the PDF already has a form, its fields, values and appearances are
+kept unchanged and shown as grey outlines; new fields are added alongside
+them and cannot reuse their names. A form can have up to 500 fields in
+total. Signed PDFs must be replaced by an unsigned copy first, dynamic XFA
+forms are rejected, and the XFA layer of a hybrid XFA form is removed so
+viewers use the standard fields. Protected inputs retain their opening
+password. Detecting fields automatically, signature, date and button
+fields, and editing existing fields are not supported.
 
 ### Bookmarks
 

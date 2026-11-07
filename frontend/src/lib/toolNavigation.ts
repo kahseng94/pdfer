@@ -11,6 +11,7 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   ocr: { title: 'Recognize text', description: 'Make scanned pages searchable with on-device text recognition.' },
   edit: { title: 'Edit a PDF', description: 'Add text, images, highlights, and drawings, or move page content.' },
   forms: { title: 'Fill forms', description: 'Complete existing form fields and save a filled copy of your PDF.' },
+  'form-builder': { title: 'Create a form', description: 'Add text boxes, checkboxes, dropdowns, and radio buttons to make a PDF fillable.' },
   redact: { title: 'Redact a PDF', description: 'Permanently remove sensitive text and areas from your document.' },
   signatures: { title: 'Add signatures', description: 'Place a saved signature on the pages you choose.' },
   stamps: { title: 'Numbers & watermarks', description: 'Add page numbers and watermarks to your PDF.' },

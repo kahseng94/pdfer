@@ -6,7 +6,7 @@ import { TOOLS } from './lib/tools'
 
 // Exercise app navigation without starting the individual tools' I/O.
 beforeAll(() => {
-  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'OfficeTool', 'ExcelCsvTool', 'CsvExcelTool', 'SheetViewTool', 'MarkdownTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'RedactTool', 'ProjectsPanel']) {
+  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'OfficeTool', 'ExcelCsvTool', 'CsvExcelTool', 'SheetViewTool', 'MarkdownTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'FormBuilderTool', 'RedactTool', 'ProjectsPanel']) {
     vi.doMock(`./components/${name}`, () => ({ [name]: ({ active }: { active?: boolean }) => <span data-active={active}>{name}</span> }))
   }
 })

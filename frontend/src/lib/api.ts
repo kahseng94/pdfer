@@ -6,6 +6,7 @@ import type { StampSettings } from './stamps'
 import { effectiveImageLayout, type ImagePdfLayout } from './imageLayout'
 import type { PageLayout } from './organize'
 import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } from './documentTools'
+import type { FieldSpec } from './formBuilder'
 import type { MetadataChanges, MetadataSchema } from './metadata'
 import { validatePdfTarget } from './pdfTarget'
 import type { OfficeKind, OfficeStatus } from './office'
@@ -73,6 +74,10 @@ export function fillForms(file: File, values: Record<string, FormValue>, flatten
   const body = pdfBody(file)
   body.append('values', JSON.stringify(values)); body.append('flatten', String(flatten))
   return post('/api/forms/fill', body, 'filled.pdf', pdfPassword(file), signal)
+}
+export function createFormFields(file: File, fields: readonly FieldSpec[], signal?: AbortSignal): Promise<File> {
+  const body = pdfBody(file); body.append('fields', JSON.stringify(fields))
+  return post('/api/forms/create', body, 'form.pdf', pdfPassword(file), signal)
 }
 export function writeBookmarks(file: File, entries: readonly BookmarkEntry[], signal?: AbortSignal): Promise<File> {
   const body = pdfBody(file); body.append('entries', JSON.stringify(entries))

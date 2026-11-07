@@ -4,6 +4,11 @@ export type FormField = {
   type: 'text' | 'checkbox' | 'radio' | 'choice' | 'unsupported'; value: FormValue
   options: { value: string; label: string }[]; reason: string | null
   multiline?: boolean; maxLength?: number | null; editable?: boolean; allowEmpty?: boolean
+  /** Where each of the field's widgets sits, in display points like the Edit tool's (top-left origin). */
+  boxes?: FieldBox[]
+}
+/** One of a field's widgets. A checkbox or radio button widget also says which option it turns on. */
+export type FieldBox = { page: number; x: number; y: number; width: number; height: number; option?: string
 }
 export type FormSchema = { fields: FormField[]; pages: number; signed: boolean; xfa: boolean }
 export type BookmarkEntry = { id: string; sourceId: string | null; title: string; page: number | null; level: number }
