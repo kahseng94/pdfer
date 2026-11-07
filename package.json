@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Private, local PDF tools for your desktop",
   "author": "Jayson Ng",
-  "main": "desktop/main.cjs",
+  "main": "desktop/start.cjs",
   "private": true,
   "scripts": {
     "postinstall": "uv --directory backend sync",
