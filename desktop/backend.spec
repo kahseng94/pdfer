@@ -18,7 +18,7 @@ if (tessdata / "pdf.ttf").is_file():
 for name in ("configs", "tessconfigs"):
     if (tessdata / name).is_dir():
         datas.append((str(tessdata / name), "tessdata/" + name))
-for package in ("pikepdf", "Pillow", "fonttools", "img2pdf", "fastapi", "uvicorn"):
+for package in ("pikepdf", "Pillow", "fonttools", "img2pdf", "openpyxl", "et_xmlfile", "fastapi", "uvicorn"):
     datas += copy_metadata(package)
 binaries = [(str(tesseract), "ocr")]
 if os.name == "nt":

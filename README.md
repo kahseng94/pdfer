@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
+Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, view Excel and CSV files, convert Excel workbooks to CSV and back, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Desktop app
@@ -639,6 +639,70 @@ the converter. Each job uses temporary files and a separate LibreOffice
 profile with macros disabled; temporary data is removed on success or failure.
 The converter uses LibreOffice's documented [command-line PDF export](https://help.libreoffice.org/latest/en-US/text/shared/guide/pdf_params.html).
 
+### View spreadsheets
+
+**View spreadsheet**, under **Spreadsheets**, opens an `.xlsx` or `.xlsm`
+workbook, or a `.csv` or `.tsv` file, as a read-only grid with column letters
+and row numbers that stay in view while scrolling. A workbook opens on the
+sheet Excel would show; the tabs above the grid open the others, including
+hidden sheets. Numbers and dates appear in each cell's Excel number format
+(currency, percentages, thousands separators, decimals, scientific notation,
+and date and time codes such as `d-mmm-yy h:mm AM/PM`); a format beyond these,
+such as fractions or conditional sections, shows the plain value instead.
+Numbers line up on the right, as in Excel.
+
+Click a cell, or move with the arrow keys, Page Up/Down, Home/End and
+Ctrl/⌘ with an arrow, Home or End, to see the cell in full above the grid:
+its formula and result, or its stored value when the format changes it
+(`$3.50 (stored as 3.5)`). Ctrl/⌘+C copies the shown text. **Find** searches
+the shown text, ignoring case, jumps to the first match and steps through the
+rest with Enter, Shift+Enter or the arrows; up to 10,000 matches are counted.
+A CSV file is read with the same separator and encoding detection as CSV to
+Excel; choose another separator if the columns look wrong. Large sheets show
+their first 100,000 rows or about 2 million cells, with a note when there are
+more. **Open in** sends the file to the conversion tools.
+
+### Excel to CSV and CSV to Excel
+
+Under **Spreadsheets**, **Excel to CSV** saves a worksheet of an `.xlsx` or
+`.xlsm` workbook as CSV, and **CSV to Excel** builds a workbook from `.csv` or
+`.tsv` files. Both run inside pdfer and need neither Excel nor LibreOffice.
+Old `.xls` workbooks must first be saved as `.xlsx` in Excel or LibreOffice.
+
+**Excel to CSV** starts on the sheet the workbook opens on; choose another
+sheet, including hidden ones, or **All sheets** for a ZIP with one CSV per
+worksheet that has data. Chart sheets are skipped. Choose a comma, semicolon
+or tab separator. **Mark the file as UTF-8 for Excel** adds a byte order mark
+so Excel shows accented and non-English letters correctly; turn it off for
+tools that want plain UTF-8. Cells are written as their values, not their
+display formatting: numbers as Excel's General format shows them (up to 15
+significant digits), 15% as `0.15`, dates as `2026-11-07`, date-times as
+`2026-11-07 08:15:00`, and logical values as `TRUE`/`FALSE`. Formulas give the
+result saved with the workbook; formulas saved without one, as some generated
+workbooks are, come out empty and are counted in a warning. Every line has
+the same number of fields, and trailing empty rows and columns are dropped.
+A preview shows the first rows before you download.
+
+**CSV to Excel** puts each file on its own sheet, in the order listed, named
+after the file (adjusted to Excel's sheet-name rules). The separator is
+detected from the first lines unless you choose one, and an Excel `sep=` first
+line is honored. Text is read as UTF-8 (with or without a byte order mark),
+UTF-16 with a byte order mark, or else Windows-1252. With **Turn numbers,
+dates and TRUE/FALSE into Excel values**, plain numbers become numbers, ISO
+dates (`2026-11-07`), date-times and `h:mm:ss` times become dates and times,
+and `TRUE`/`FALSE` become logical values. Anything that would change stays
+text: numbers with leading zeros (`007`), numbers with more than 15
+significant digits (card and account numbers), dates before 1900 and dates
+written another way. With **The first row holds column names**, that row
+stays text, is bold, is frozen while scrolling and gets filter buttons.
+Fields that start with `=` are always stored as text, never as formulas.
+Control characters Excel cannot store are removed and counted.
+
+A workbook may be up to 64 MiB (512 MiB expanded); CSV files up to 64 MiB in
+total, 50 files, and Excel's limits of 1,048,576 rows, 16,384 columns and
+32,767 characters per cell. Cancelling stops the conversion. Results can be
+opened in the other tool, and a new workbook in **Excel to PDF**.
+
 ### Images to PDF layouts
 
 Use **PNG to PDF** for PNGs, **JPG to PDF** for `.jpg`/`.jpeg` files, or
@@ -747,7 +811,7 @@ sync with `backend/uv.lock` automatically.
 ## Layout
 
 ```
-backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontTools
+backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontTools, openpyxl
   src/pdfer/core.py      merge / split / organize / edit / compress (PDFs and images) / images / photo / spec parsing, no web code
   src/pdfer/fonts.py     the embedded fonts for text edits: registry, subsetting, PDF font objects
   src/pdfer/signatures.py local persistent signature-image library
@@ -755,6 +819,8 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/bookmarks.py outline reading/editing with preserved destinations
   src/pdfer/metadata.py  targeted XMP/DocumentInfo edits and explicit document-metadata clearing
   src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
+  src/pdfer/spreadsheets.py Excel ↔ CSV with openpyxl, and sheets as cells for the viewer
+  src/pdfer/number_formats.py Excel number and date formats, for showing cells as Excel does
   src/pdfer/ocr.py       local OCR process dispatch, rotation and invisible text-layer assembly
   src/pdfer/paddle_ocr.py optional PP-OCRv6 runtime discovery
   src/pdfer/ocr_text.py  invisible Unicode PDF layers from recognized word positions
@@ -763,7 +829,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), ExcelCsvTool, CsvExcelTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
   src/components/OcrTool.tsx OCR languages, ranges, progress and preview
@@ -820,6 +886,10 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/images` | `files` (JPEG or PNG, 1 or more, in order), optional `paper`, `orientation`, `margin_mm`, `fit` | `images.pdf`, one page per image; the same file is previewed and downloaded |
 | `GET /api/office/status` | | JSON: `available`, `message`; checks the local LibreOffice installation |
 | `POST /api/office` | `file`, `kind` (`word`, `excel`, `powerpoint`) | `<name>.pdf`; converts one matching Office document locally |
+| `POST /api/spreadsheets/sheets` | `file` (`.xlsx` or `.xlsm`) | JSON: `sheets` (each `name` and `hidden`) and the `active` sheet index; chart sheets are left out |
+| `POST /api/spreadsheets/view` | `file` (`.xlsx`, `.xlsm`, `.csv` or `.tsv`), optional `sheet` (index; default the sheet the workbook opens on), `delimiter` (`auto`, `comma`, `semicolon`, `tab`; CSV only) | JSON: `sheets`, `sheet`, `rows` (each cell null, text, or `[shown text, "n"\|"b"\|"e"]` for numbers and dates, logical values and errors), `columns`, `truncated`, `formulas` and `values` as `[row, column, text]`, and `csv` (`delimiter`, `encoding`) for CSV files |
+| `POST /api/spreadsheets/csv` | `file`, optional `sheet` (`active`, `all` or a sheet index; default `active`), `delimiter` (`comma`, `semicolon`, `tab`), `bom` (default true) | `<name>.csv` (or `<name>_<sheet>.csv` from a workbook with several sheets), or `<name>_sheets.zip` for `all`; `X-Spreadsheet-Summary` JSON gives each sheet's `name`, `rows`, `columns` and the count of formulas saved without a result (`uncalculated`) |
+| `POST /api/spreadsheets/xlsx` | `files` (1–50 CSV/TSV files, in sheet order), optional `delimiter` (`auto`, `comma`, `semicolon`, `tab`), `detect_types` (default true), `header` (default true) | `<name>.xlsx` for one file or `combined.xlsx`; `X-Spreadsheet-Summary` JSON gives each sheet's `name`, `source`, `rows`, `columns`, `delimiter` and `encoding`, and the control characters `removed` |
 | `POST /api/photo` | `file` (JPEG or PNG), `crop`, `width`, `height`, `dpi`, `max_kb` | `<name>_passport.jpg`, a JPEG of `width` × `height` pixels |
 | `POST /api/photo-sheet` | `file`, `crop`, `photo_width`, `photo_height`, `paper` | `<name>_passport_sheet.pdf`, with an `X-Copies` header |
 

@@ -8,9 +8,11 @@ type Props = {
   compact?: boolean
   title: string
   onFiles: (files: File[]) => void
+  /** Given the files of other kinds, so the tool can say why; the zone then says nothing itself. */
+  onSkipped?: (files: File[]) => void
 }
 
-export function Dropzone({ kind = 'pdf', multiple = false, compact = false, title, onFiles }: Props) {
+export function Dropzone({ kind = 'pdf', multiple = false, compact = false, title, onFiles, onSkipped }: Props) {
   const { accept: acceptTypes, one, many, formatHint } = FILE_KINDS[kind]
   const input = useRef<HTMLInputElement>(null)
   const hintId = useId()
@@ -18,9 +20,11 @@ export function Dropzone({ kind = 'pdf', multiple = false, compact = false, titl
   const [skipped, setSkipped] = useState(0)
 
   function accept(list: FileList | null) {
-    const { wanted, skipped } = pickFiles(list ?? [], kind)
-    setSkipped(skipped)
+    const all = [...(list ?? [])]
+    const { wanted, skipped } = pickFiles(all, kind)
+    setSkipped(onSkipped ? 0 : skipped)
     if (wanted.length) onFiles(multiple ? wanted : wanted.slice(0, 1))
+    if (onSkipped && skipped) onSkipped(all.filter((f) => !FILE_KINDS[kind].is(f)))
   }
 
   function onDrop(e: DragEvent) {

@@ -21,7 +21,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import bookmarks, core, fonts, forms, metadata, ocr, office, redactions, signatures
+from pdfer import bookmarks, core, fonts, forms, metadata, ocr, office, redactions, signatures, spreadsheets
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -336,6 +336,116 @@ async def office_to_pdf(request: Request, file: UploadFile, kind: Annotated[Lite
     # Upload names are labels only; conversion uses a fixed name in a private folder.
     name = "".join(char for char in _stem(filename) if char.isprintable()) or "document"
     return _download(output, f"{name}.pdf", "application/pdf")
+
+
+def _upload_name(file: UploadFile, fallback: str) -> str:
+    """The uploaded file's own name without any folders; it only labels results."""
+    name = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    return "".join(char for char in name if char.isprintable()) or fallback
+
+
+async def _cancellable(request: Request, work, /, *args, **kwargs):
+    """Run blocking work in a thread; stop it and return None if the browser stops waiting."""
+    cancelled = threading.Event()
+    task = asyncio.create_task(asyncio.to_thread(work, *args, cancelled=cancelled.is_set, **kwargs))
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                cancelled.set()
+                try:
+                    await task
+                except spreadsheets.Cancelled:
+                    pass
+                return None
+            await asyncio.wait({task}, timeout=0.1)
+        return await task
+    finally:
+        cancelled.set()
+        if not task.done():
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
+
+@app.post("/api/spreadsheets/sheets")
+def spreadsheet_sheets(file: UploadFile) -> Response:
+    """The worksheets in an .xlsx or .xlsm workbook and the one it opens on."""
+    data = file.file.read(spreadsheets.MAX_WORKBOOK_BYTES + 1)
+    return JSONResponse(spreadsheets.sheets(data, _upload_name(file, "workbook.xlsx")), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/spreadsheets/view")
+async def spreadsheet_view(
+    request: Request, file: UploadFile,
+    sheet: Annotated[int | None, Form(ge=0)] = None,
+    delimiter: Annotated[Literal["auto", "comma", "semicolon", "tab"], Form()] = "auto",
+) -> Response:
+    """One worksheet of an .xlsx/.xlsm workbook (default: the one it opens on), or a .csv/.tsv file, as JSON cells.
+
+    See `spreadsheets.view` for the shape. `delimiter` applies to CSV files only.
+    """
+    data = await file.read(max(spreadsheets.MAX_WORKBOOK_BYTES, spreadsheets.MAX_CSV_BYTES) + 1)
+    result = await _cancellable(request, spreadsheets.view, data, _upload_name(file, "file"), sheet, delimiter)
+    if result is None:
+        return Response(status_code=499)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/spreadsheets/csv")
+async def excel_to_csv(
+    request: Request, file: UploadFile,
+    sheet: Annotated[str, Form()] = "active",
+    delimiter: Annotated[Literal["comma", "semicolon", "tab"], Form()] = "comma",
+    bom: Annotated[bool, Form()] = True,
+) -> Response:
+    """One worksheet as CSV, or with `sheet=all` a ZIP with a CSV per worksheet that has data.
+
+    `sheet` is `active`, `all` or a 0-based worksheet index. `X-Spreadsheet-Summary`
+    is JSON with each sheet's `name`, `rows` and `columns`, and `uncalculated`:
+    formulas saved without a result, which are empty in the CSV.
+    """
+    data = await file.read(spreadsheets.MAX_WORKBOOK_BYTES + 1)
+    name = _upload_name(file, "workbook.xlsx")
+    result = await _cancellable(request, spreadsheets.to_csv, data, name, sheet, delimiter, bom)
+    if result is None:
+        return Response(status_code=499)
+    files, summary = result
+    if len(files) == 1:
+        res = _download(files[0][1], files[0][0], "text/csv")
+    else:
+        res = _download(_zip(files), f"{_stem(name)}_sheets.zip", "application/zip")
+    res.headers["X-Spreadsheet-Summary"] = json.dumps(summary)
+    return res
+
+
+@app.post("/api/spreadsheets/xlsx")
+async def csv_to_excel(
+    request: Request, files: Annotated[list[UploadFile], File()],
+    delimiter: Annotated[Literal["auto", "comma", "semicolon", "tab"], Form()] = "auto",
+    detect_types: Annotated[bool, Form()] = True,
+    header: Annotated[bool, Form()] = True,
+) -> Response:
+    """A workbook with one worksheet per CSV file, in the order sent.
+
+    `X-Spreadsheet-Summary` is JSON with each sheet's `name`, `source` file,
+    `rows`, `columns`, the `delimiter` and text `encoding` used, and `removed`:
+    control characters dropped because Excel cannot store them.
+    """
+    if len(files) > spreadsheets.MAX_CSV_FILES:
+        raise core.PdfToolError(f"Choose at most {spreadsheets.MAX_CSV_FILES} CSV files at a time.")
+    contents, total = [], 0
+    for index, upload in enumerate(files):
+        data = await upload.read(spreadsheets.MAX_CSV_BYTES - total + 1)
+        total += len(data)
+        if total > spreadsheets.MAX_CSV_BYTES:
+            raise core.PdfToolError("CSV files must be 64 MB or smaller in total. Convert fewer files at a time.")
+        contents.append((_upload_name(upload, f"File {index + 1}.csv"), data))
+    result = await _cancellable(request, spreadsheets.to_xlsx, contents, delimiter, detect_types, header)
+    if result is None:
+        return Response(status_code=499)
+    workbook, summary = result
+    name = f"{_stem(contents[0][0])}.xlsx" if len(contents) == 1 else "combined.xlsx"
+    res = _download(workbook, name, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    res.headers["X-Spreadsheet-Summary"] = json.dumps(summary)
+    return res
 
 
 @app.post("/api/images")

@@ -9,6 +9,8 @@ import type { BookmarkEntry, BookmarkSchema, FormSchema, FormValue, PdfSize } fr
 import type { MetadataChanges, MetadataSchema } from './metadata'
 import { validatePdfTarget } from './pdfTarget'
 import type { OfficeKind, OfficeStatus } from './office'
+import type { SheetView } from './sheetView'
+import { parseSummary, type CsvDelimiter, type CsvSummary, type WorkbookSheets, type WorkbookSummary } from './spreadsheets'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -219,6 +221,62 @@ export function imagesToPdf(files: File[], layout?: ImagePdfLayout, signal?: Abo
     body.append('fit', settings.fit)
   }
   return post('/api/images', body, 'images.pdf', '', signal)
+}
+
+/** Post a form and read the JSON answer, turning a backend error into its message. */
+async function postForJson<T>(path: string, body: FormData, failure: string, signal?: AbortSignal): Promise<T> {
+  let response: Response
+  try { response = await fetch(path, { method: 'POST', body, signal }) }
+  catch { signal?.throwIfAborted(); throw new Error("Can't reach the pdfer backend. Is it running?") }
+  if (!response.ok) {
+    const value = await response.json().catch(() => null) as { detail?: unknown } | null
+    throw new Error(typeof value?.detail === 'string' ? value.detail : `${failure} (HTTP ${response.status}).`)
+  }
+  return response.json() as Promise<T>
+}
+
+/** The worksheets in an .xlsx or .xlsm workbook and the one it opens on. */
+export function readWorkbookSheets(file: File, signal?: AbortSignal): Promise<WorkbookSheets> {
+  const body = new FormData()
+  body.append('file', file)
+  return postForJson('/api/spreadsheets/sheets', body, 'Could not read the workbook', signal)
+}
+
+/** One sheet of a workbook (null: the one it opens on), or a CSV file, as cells to show. */
+export function viewSpreadsheet(file: File, options: { sheet: number | null; delimiter: CsvDelimiter | 'auto' }, signal?: AbortSignal): Promise<SheetView> {
+  const body = new FormData()
+  body.append('file', file)
+  if (options.sheet !== null) body.append('sheet', String(options.sheet))
+  body.append('delimiter', options.delimiter)
+  return postForJson('/api/spreadsheets/view', body, 'Could not open the spreadsheet', signal)
+}
+
+/** `sheet` is a worksheet's index, or 'all' for a ZIP with one CSV per worksheet that has data. */
+export type CsvOptions = { sheet: number | 'all'; delimiter: CsvDelimiter; bom: boolean }
+
+export async function excelToCsv(file: File, options: CsvOptions, signal?: AbortSignal): Promise<{ file: File; summary: CsvSummary | null }> {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('sheet', String(options.sheet))
+  body.append('delimiter', options.delimiter)
+  body.append('bom', String(options.bom))
+  const stem = file.name.replace(/\.[^.]+$/, '')
+  const { file: output, headers } = await upload('/api/spreadsheets/csv', body, options.sheet === 'all' ? `${stem}_sheets.zip` : `${stem}.csv`, signal)
+  return { file: output, summary: parseSummary<CsvSummary>(headers.get('x-spreadsheet-summary')) }
+}
+
+export type WorkbookOptions = { delimiter: CsvDelimiter | 'auto'; detectTypes: boolean; header: boolean }
+
+/** One workbook with a worksheet per CSV file, in the order given. */
+export async function csvToExcel(files: File[], options: WorkbookOptions, signal?: AbortSignal): Promise<{ file: File; summary: WorkbookSummary | null }> {
+  const body = new FormData()
+  for (const f of files) body.append('files', f)
+  body.append('delimiter', options.delimiter)
+  body.append('detect_types', String(options.detectTypes))
+  body.append('header', String(options.header))
+  const fallback = files.length === 1 ? `${files[0].name.replace(/\.[^.]+$/, '')}.xlsx` : 'combined.xlsx'
+  const { file, headers } = await upload('/api/spreadsheets/xlsx', body, fallback, signal)
+  return { file, summary: parseSummary<WorkbookSummary>(headers.get('x-spreadsheet-summary')) }
 }
 
 export type CompressLevel = 'light' | 'balanced' | 'strong'
