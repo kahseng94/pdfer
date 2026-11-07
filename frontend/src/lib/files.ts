@@ -2,8 +2,9 @@
 
 import { MAX_OFFICE_BYTES, OFFICE_FORMATS, type OfficeKind } from './office'
 import { MAX_CSV_BYTES, MAX_WORKBOOK_BYTES } from './spreadsheets'
+import { MAX_MARKDOWN_BYTES } from './markdown'
 
-export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'xlsx' | 'csv' | 'sheet' | 'compressible'
+export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'xlsx' | 'csv' | 'sheet' | 'markdown' | 'compressible'
 
 type KindSpec = {
   /** The `accept` attribute for a file input. */
@@ -83,6 +84,11 @@ export const FILE_KINDS: Record<FileKind, KindSpec> = {
     accept: `${XLSX.accept},${CSV.accept}`,
     formatHint: `Excel workbooks (.xlsx, .xlsm) and CSV files (.csv, .tsv) · Up to ${MAX_WORKBOOK_BYTES / (1024 * 1024)} MB`,
     one: 'a spreadsheet', many: 'spreadsheets', is: (f) => XLSX.is(f) || CSV.is(f),
+  },
+  markdown: {
+    accept: '.md,.markdown,.mdown,.mkd,.mkdn,text/markdown',
+    formatHint: `Markdown files (.md, .markdown) · Up to ${MAX_MARKDOWN_BYTES / (1024 * 1024)} MB`,
+    one: 'a Markdown file', many: 'Markdown files', is: (f) => /\.(md|markdown|mdown|mkdn?)$/i.test(f.name),
   },
   /** What the Compress tool takes: a PDF, or pictures including WebP. */
   compressible: {

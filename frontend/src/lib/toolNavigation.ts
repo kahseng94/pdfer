@@ -27,6 +27,7 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   'sheet-view': { title: 'View a spreadsheet', description: 'Browse and search an Excel workbook or CSV file, with values shown as Excel formats them.' },
   'excel-csv': { title: 'Excel to CSV', description: 'Save a worksheet, or every sheet, as CSV text that other apps can import.' },
   'csv-excel': { title: 'CSV to Excel', description: 'Turn CSV files into a workbook with real numbers and dates, one sheet per file.' },
+  markdown: { title: 'Markdown editor', description: 'Write or open a Markdown file and see it formatted as you type.' },
   photo: { title: 'Passport photo', description: 'Crop and size a photo for a passport or visa.' },
 }
 

@@ -29,6 +29,7 @@ export const TOOLS = [
   { id: 'sheet-view', label: 'View spreadsheet', takes: 'sheet' },
   { id: 'excel-csv', label: 'Excel to CSV', takes: 'xlsx' },
   { id: 'csv-excel', label: 'CSV to Excel', takes: 'csv' },
+  { id: 'markdown', label: 'Markdown editor', takes: 'markdown' },
   { id: 'photo', label: 'Photo', takes: 'image' },
 ] as const satisfies readonly { id: string; label: string; takes: FileKind }[]
 

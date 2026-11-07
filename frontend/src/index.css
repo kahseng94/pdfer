@@ -260,3 +260,53 @@ button:not(:disabled), summary { cursor: pointer; }
 .pdf-search-text-layer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
 .pdf-search-text-layer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
 .pdf-search-text-layer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+
+/* Formatted Markdown in the editor's preview and its print copy. Tailwind's reset removes
+   heading sizes and list markers, so they are set again here. */
+.markdown-body { color: var(--ui-text); font-size: 15px; line-height: 1.65; overflow-wrap: break-word; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body :is(p, ul, ol, blockquote, pre, table, hr, section) { margin: 0 0 1em; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6) { margin: 1.4em 0 0.6em; font-weight: 650; line-height: 1.25; scroll-margin-top: 8px; }
+.markdown-body h1 { font-size: 1.85em; padding-bottom: 0.25em; border-bottom: 1px solid var(--ui-border); }
+.markdown-body h2 { font-size: 1.45em; padding-bottom: 0.2em; border-bottom: 1px solid var(--ui-border); }
+.markdown-body h3 { font-size: 1.2em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body :is(h5, h6) { font-size: 0.9em; color: var(--ui-secondary); }
+.markdown-body a { color: var(--ui-accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-body a[data-unavailable] { color: var(--ui-secondary); text-decoration-style: dotted; cursor: default; }
+.markdown-body :is(ul, ol) { padding-left: 1.6em; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li + li, .markdown-body li > :is(ul, ol) { margin-top: 0.25em; }
+.markdown-body li > :is(ul, ol) { margin-bottom: 0; }
+.markdown-body li:has(> input[type="checkbox"]) { list-style: none; }
+.markdown-body li > input[type="checkbox"] { margin: 0 0.45em 0 -1.35em; vertical-align: -0.1em; accent-color: var(--ui-accent); cursor: pointer; }
+.markdown-body blockquote { padding: 0 1em; color: var(--ui-secondary); border-left: 4px solid var(--ui-border); }
+.markdown-body :is(code, pre) { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875em; }
+.markdown-body :not(pre) > code { padding: 0.15em 0.35em; border-radius: 4px; background: var(--ui-raised); }
+.markdown-body pre { padding: 0.9em 1em; overflow-x: auto; border-radius: 8px; background: var(--ui-raised); line-height: 1.5; }
+.markdown-body hr { border: 0; border-top: 2px solid var(--ui-border); }
+.markdown-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-body :is(th, td) { padding: 0.35em 0.8em; border: 1px solid var(--ui-border); }
+.markdown-body th { font-weight: 600; background: var(--ui-raised); }
+.markdown-body del { color: var(--ui-muted); }
+.markdown-body .footnotes { font-size: 0.875em; color: var(--ui-secondary); border-top: 1px solid var(--ui-border); padding-top: 0.75em; }
+.markdown-image { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.1em 0.5em; border: 1px dashed var(--ui-strong-border); border-radius: 6px; color: var(--ui-secondary); font-size: 0.875em; }
+.markdown-image::before { content: "🖼"; }
+
+/* Only the Markdown print copy is printed, in dark text on white whatever the app's theme. */
+.markdown-print-copy { display: none; }
+@media print {
+  html.printing-markdown {
+    color-scheme: light;
+    --ui-text: #18181b; --ui-secondary: #3f3f46; --ui-muted: #52525b; --ui-border: #d4d4d8;
+    --ui-strong-border: #a1a1aa; --ui-raised: #f4f4f5; --ui-accent: #e11d48; --ui-accent-ink: #be123c;
+  }
+  html.printing-markdown body { background: #fff; }
+  html.printing-markdown body > :not(.markdown-print-copy) { display: none !important; }
+  html.printing-markdown .markdown-print-copy { display: block; font-size: 11pt; }
+  .markdown-print-copy :is(pre, blockquote, table, tr, .markdown-image) { break-inside: avoid; }
+  .markdown-print-copy :is(h1, h2, h3, h4) { break-after: avoid; }
+  .markdown-print-copy table { display: table; width: auto; }
+}

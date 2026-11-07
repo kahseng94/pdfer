@@ -12,6 +12,7 @@ const GROUPS = [
   group('Edit & annotate', 'edit', 'forms', 'redact', 'signatures', 'stamps'),
   group('Convert to PDF', 'word', 'excel', 'powerpoint', 'png', 'jpg', 'images'),
   group('Spreadsheets', 'sheet-view', 'excel-csv', 'csv-excel'),
+  group('Text', 'markdown'),
   group('Export & finish', 'compress', 'pdf-images', 'passwords', 'workflows', 'photo'),
 ]
 const navigationTools = GROUPS.flatMap((section) => section.tools)
@@ -43,6 +44,7 @@ const TOOL_PATHS: Record<ToolId, string> = {
   'sheet-view': 'M3 4h18v10H3zM3 9h18M9 4v10M12 17a3 3 0 1 0 0 .01M14.2 19.2 17 22',
   'excel-csv': 'M3 4h11v16H3zM3 9h11M3 14h11M8 9v11m9-8h4m-2-2 2 2-2 2',
   'csv-excel': 'M10 4h11v16H10zM10 9h11M10 14h11M15 9v11M3 12h4m-2-2 2 2-2 2',
+  markdown: 'M3 6h18v12H3zM6 15V9l2.5 3L11 9v6m6-6v6m-2.5-2.5L17 15l2.5-2.5',
   photo: 'M4 4h16v16H4zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-5 13v-2a5 5 0 0 1 10 0v2',
 }
 

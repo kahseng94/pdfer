@@ -10,6 +10,7 @@ import { ImagesTool } from './components/ImagesTool'
 import { OfficeTool } from './components/OfficeTool'
 import { ExcelCsvTool } from './components/ExcelCsvTool'
 import { SheetViewTool } from './components/SheetViewTool'
+import { MarkdownTool } from './components/MarkdownTool'
 import { CsvExcelTool } from './components/CsvExcelTool'
 import { MergeTool } from './components/MergeTool'
 import { OrganizeTool } from './components/OrganizeTool'
@@ -135,6 +136,9 @@ export default function App() {
             </section>
             <section id="panel-csv-excel" role="tabpanel" aria-labelledby="tab-csv-excel" hidden={tool !== 'csv-excel'}>
               <CsvExcelTool active={tool === 'csv-excel'} />
+            </section>
+            <section id="panel-markdown" role="tabpanel" aria-labelledby="tab-markdown" hidden={tool !== 'markdown'}>
+              <MarkdownTool active={tool === 'markdown'} />
             </section>
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />

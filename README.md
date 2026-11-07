@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, view Excel and CSV files, convert Excel workbooks to CSV and back, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
+Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, view Excel and CSV files, convert Excel workbooks to CSV and back, write and preview Markdown, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Desktop app
@@ -703,6 +703,37 @@ total, 50 files, and Excel's limits of 1,048,576 rows, 16,384 columns and
 32,767 characters per cell. Cancelling stops the conversion. Results can be
 opened in the other tool, and a new workbook in **Excel to PDF**.
 
+### Markdown editor
+
+**Markdown editor**, under **Text**, opens a `.md` or `.markdown` file, or
+starts a new document, and shows it formatted as you type. Choose **Write**,
+**Split** (side by side, or stacked on narrow windows) or **Preview**; the
+choice is remembered. GitHub-flavoured Markdown is supported: headings,
+emphasis, lists, task lists, tables, strikethrough, code, quotes, footnotes and
+web addresses that become links. Tick a task in the preview to tick it in the
+text, and follow `#heading` links within the document.
+
+The toolbar adds bold, italic, strikethrough, headings (level 1–3, then off),
+links, bulleted, numbered and task lists, quotes, code and tables, and removes
+the formatting when the selection already has it. Shortcuts: Ctrl/⌘+B, I, K
+(link), E (code) and S (download). Enter continues a list or quote, numbering
+the next item, and Enter on an empty item ends it. Toolbar edits can be
+undone like typing.
+
+**Download** saves the text under the name shown (`.md` is added when there is
+no extension), with Windows line endings kept if the file had them, as UTF-8.
+Files that are not UTF-8 are read as UTF-16 (with a byte order mark) or
+Windows-1252. **Print or save as PDF** prints only the formatted document, in
+dark text on white; choose **Save as PDF** in the print dialog. Opening
+another file, starting a new one or closing asks first when there are changes
+that haven't been downloaded. The open document is kept in this browser and
+reopened next time, up to a million characters.
+
+The preview stays on this computer: raw HTML in the text is shown as text,
+links that could run code are removed, pictures appear only as their
+description, and links to other files are not followed. Web links open in a
+new browser tab; the desktop app does not open them. Files may be up to 5 MiB.
+
 ### Images to PDF layouts
 
 Use **PNG to PDF** for PNGs, **JPG to PDF** for `.jpg`/`.jpeg` files, or
@@ -829,9 +860,10 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), ExcelCsvTool, CsvExcelTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), MarkdownTool, ExcelCsvTool, CsvExcelTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
+  src/lib/markdown.ts    safe Markdown rendering with micromark, toolbar edits, task ticking and drafts
   src/components/OcrTool.tsx OCR languages, ranges, progress and preview
   src/lib/ocr.ts         sequential scan rendering and OCR orchestration
 ```
