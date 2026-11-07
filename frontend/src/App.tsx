@@ -52,6 +52,7 @@ export default function App() {
     <HandoffContext value={{ delivery, send }}>
       <ProjectContext value={projects}>
         <div className="app-shell">
+          <div className="title-bar" aria-hidden="true" />
           <a className="skip-link" href="#workspace">Skip to workspace</a>
           <ToolNavigation selected={tool} onSelect={select} />
           <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' ? 'workspace-wide' : ''}`}>
