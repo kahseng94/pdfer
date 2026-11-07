@@ -21,7 +21,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import bookmarks, core, fonts, forms, metadata, ocr, redactions, signatures
+from pdfer import bookmarks, core, fonts, forms, metadata, ocr, office, redactions, signatures
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -321,6 +321,21 @@ def font_file(name: str) -> Response:
     if font is None:
         return JSONResponse(status_code=404, content={"detail": f"No font called {name}."})
     return Response(font.path.read_bytes(), media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/office/status")
+def office_status() -> Response:
+    return JSONResponse(office.status(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/office")
+async def office_to_pdf(request: Request, file: UploadFile, kind: Annotated[Literal["word", "excel", "powerpoint"], Form()]) -> Response:
+    data = await file.read(office.MAX_SOURCE_BYTES + 1)
+    filename = (file.filename or "document").replace("\\", "/").rsplit("/", 1)[-1]
+    output = await office.convert(data, filename, kind, request.is_disconnected)
+    # Upload names are labels only; conversion uses a fixed name in a private folder.
+    name = "".join(char for char in _stem(filename) if char.isprintable()) or "document"
+    return _download(output, f"{name}.pdf", "application/pdf")
 
 
 @app.post("/api/images")

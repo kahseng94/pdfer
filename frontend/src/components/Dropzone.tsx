@@ -11,7 +11,7 @@ type Props = {
 }
 
 export function Dropzone({ kind = 'pdf', multiple = false, compact = false, title, onFiles }: Props) {
-  const { accept: acceptTypes, one, many } = FILE_KINDS[kind]
+  const { accept: acceptTypes, one, many, formatHint } = FILE_KINDS[kind]
   const input = useRef<HTMLInputElement>(null)
   const hintId = useId()
   const [dragging, setDragging] = useState(false)
@@ -36,7 +36,7 @@ export function Dropzone({ kind = 'pdf', multiple = false, compact = false, titl
         type="button"
         data-dropzone=""
         aria-label={title}
-        aria-describedby={compact ? undefined : hintId}
+        aria-describedby={compact ? undefined : `${hintId} ${hintId}-formats`}
         onClick={() => input.current?.click()}
         onDragOver={(e) => {
           e.preventDefault()
@@ -51,7 +51,7 @@ export function Dropzone({ kind = 'pdf', multiple = false, compact = false, titl
         {!compact && <>
           <span id={hintId} className="dropzone-hint">Drag and drop {multiple ? many : one} here</span>
           <span className="dropzone-browse" aria-hidden="true">Browse files</span>
-          <span className="dropzone-formats">{kind === 'pdf' ? 'PDF documents' : kind === 'image' ? 'JPG and PNG images' : 'PDF, JPG, PNG, and WebP files'}</span>
+          <span id={`${hintId}-formats`} className="dropzone-formats">{formatHint}</span>
         </>}
       </button>
       {skipped > 0 && (

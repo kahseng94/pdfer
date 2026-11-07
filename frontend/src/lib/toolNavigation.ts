@@ -18,6 +18,11 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   'pdf-images': { title: 'PDF to images', description: 'Export the pages you need as individual image files.' },
   passwords: { title: 'PDF passwords', description: 'Protect a PDF with a password, or unlock one you can already open.' },
   workflows: { title: 'Workflows', description: 'Apply a saved sequence of PDF tools to a batch of documents.' },
+  word: { title: 'Word to PDF', description: 'Export your document with its page layout and the fonts installed on this computer.' },
+  excel: { title: 'Excel to PDF', description: 'Create a PDF using your workbook’s print areas, page breaks, and scaling.' },
+  powerpoint: { title: 'PowerPoint to PDF', description: 'Save each visible slide as a PDF page in presentation order.' },
+  png: { title: 'PNG to PDF', description: 'Arrange PNG images in order and choose the page size for your PDF.' },
+  jpg: { title: 'JPG to PDF', description: 'Arrange JPEG photos in order and fit them to the PDF page size you choose.' },
   images: { title: 'Images to PDF', description: 'Turn your images into a PDF with the page size and layout you need.' },
   photo: { title: 'Passport photo', description: 'Crop and size a photo for a passport or visa.' },
 }

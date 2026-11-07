@@ -6,7 +6,7 @@ import { TOOLS } from './lib/tools'
 
 // Exercise app navigation without starting the individual tools' I/O.
 beforeAll(() => {
-  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'RedactTool', 'ProjectsPanel']) {
+  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'OfficeTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'RedactTool', 'ProjectsPanel']) {
     vi.doMock(`./components/${name}`, () => ({ [name]: ({ active }: { active?: boolean }) => <span data-active={active}>{name}</span> }))
   }
 })
@@ -72,6 +72,16 @@ it('supports keyboard tabs and the compact picker without losing the selected to
 
     const picker = container.querySelector<HTMLSelectElement>('#tool-picker')!
     expect(picker.value).toBe('merge')
+    const converters = picker.querySelector('optgroup[label="Convert to PDF"]')!
+    expect([...converters.querySelectorAll('option')].map((option) => option.value)).toEqual(['word', 'excel', 'powerpoint', 'png', 'jpg', 'images'])
+    const tabs = [...container.querySelectorAll('[role="tab"]')]
+    expect([...picker.options].map((option) => `tab-${option.value}`)).toEqual(tabs.map((item) => item.id))
+    // The converter group precedes export tools on screen. Arrow keys must follow it across the boundary.
+    await act(async () => { tab('stamps').click(); tab('stamps').focus() })
+    await press('ArrowDown')
+    expect(document.activeElement).toBe(tab('word'))
+    expect(container.querySelector('h1')!.textContent).toBe('Word to PDF')
+    expect(picker.value).toBe('word')
     await act(async () => {
       picker.value = 'edit'
       picker.dispatchEvent(new Event('change', { bubbles: true }))

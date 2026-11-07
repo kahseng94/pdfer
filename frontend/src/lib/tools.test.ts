@@ -12,8 +12,8 @@ describe('targetsFor', () => {
   })
 
   it('offers JPEG and PNG pictures to the picture tools', () => {
-    expect(ids(file('me_passport.jpg', 'image/jpeg'), 'photo')).toEqual(['compress', 'images'])
-    expect(ids(file('shot_compressed.png', 'image/png'), 'compress')).toEqual(['images', 'photo'])
+    expect(ids(file('me_passport.jpg', 'image/jpeg'), 'photo')).toEqual(['compress', 'jpg', 'images'])
+    expect(ids(file('shot_compressed.png', 'image/png'), 'compress')).toEqual(['png', 'images', 'photo'])
   })
 
   it('has nowhere to send a WebP from Compress, or a zip', () => {

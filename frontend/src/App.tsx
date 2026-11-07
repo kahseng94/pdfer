@@ -7,6 +7,7 @@ import { EditTool } from './components/EditTool'
 import { LocalFilesNote, ToolNavigation } from './components/ToolNavigation'
 import { focusToolNavigation, TOOL_DETAILS } from './lib/toolNavigation'
 import { ImagesTool } from './components/ImagesTool'
+import { OfficeTool } from './components/OfficeTool'
 import { MergeTool } from './components/MergeTool'
 import { OrganizeTool } from './components/OrganizeTool'
 import { PdfImagesTool } from './components/PdfImagesTool'
@@ -116,6 +117,12 @@ export default function App() {
             <section id="panel-images" role="tabpanel" aria-labelledby="tab-images" hidden={tool !== 'images'}>
               <ImagesTool active={tool === 'images'} />
             </section>
+            {(['word', 'excel', 'powerpoint'] as const).map((kind) => <section key={kind} id={`panel-${kind}`} role="tabpanel" aria-labelledby={`tab-${kind}`} hidden={tool !== kind}>
+              <OfficeTool kind={kind} active={tool === kind} />
+            </section>)}
+            {(['png', 'jpg'] as const).map((kind) => <section key={kind} id={`panel-${kind}`} role="tabpanel" aria-labelledby={`tab-${kind}`} hidden={tool !== kind}>
+              <ImagesTool kind={kind} active={tool === kind} />
+            </section>)}
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />
             </section>

@@ -2,14 +2,18 @@ import type { KeyboardEvent } from 'react'
 import { TOOLS, type ToolId } from '../lib/tools'
 import { LogoIcon } from './icons'
 
-// Keep the existing tool order in both navigation layouts and result handoffs.
-const GROUPS = [
-  { label: 'Pages & document', tools: TOOLS.slice(0, 5) },
-  { label: 'Read & compare', tools: TOOLS.slice(5, 8) },
-  { label: 'Edit & annotate', tools: TOOLS.slice(8, 13) },
-  { label: 'Export & finish', tools: TOOLS.slice(13) },
-]
+function group(label: string, ...ids: ToolId[]) {
+  return { label, tools: TOOLS.filter((tool) => ids.includes(tool.id)) }
+}
 
+const GROUPS = [
+  group('Pages & document', 'merge', 'split', 'organize', 'bookmarks', 'metadata'),
+  group('Read & compare', 'text', 'compare', 'ocr'),
+  group('Edit & annotate', 'edit', 'forms', 'redact', 'signatures', 'stamps'),
+  group('Convert to PDF', 'word', 'excel', 'powerpoint', 'png', 'jpg', 'images'),
+  group('Export & finish', 'compress', 'pdf-images', 'passwords', 'workflows', 'photo'),
+]
+const navigationTools = GROUPS.flatMap((section) => section.tools)
 
 const TOOL_PATHS: Record<ToolId, string> = {
   merge: 'M5 3v5l7 5 7-5V3M12 13v8m-4-4 4 4 4-4',
@@ -29,6 +33,11 @@ const TOOL_PATHS: Record<ToolId, string> = {
   'pdf-images': 'M14 2H4v20h16V8l-6-6Zm0 0v6h6M7 18l3-4 3 3 2-2 2 3M8 10h.01',
   passwords: 'M5 10h14v11H5zM8 10V6a4 4 0 0 1 8 0v4m-4 5v2',
   workflows: 'M3 3h6v6H3zM15 15h6v6h-6zM9 6h9v9m-3-3 3 3 3-3',
+  word: 'M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8m-8 4h6',
+  excel: 'M3 4h18v16H3zM3 9h18M3 14h18M10 9v11',
+  powerpoint: 'M3 4h18v13H3zM12 17v4m-4 0 4-3 4 3M7 13l4-4 3 2 3-4',
+  png: 'M4 3h16v18H4zM4 16l5-5 4 4 3-3 4 4M15 7h.01',
+  jpg: 'M3 6h4l2-3h6l2 3h4v14H3zM16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
   images: 'M3 3h18v18H3zM3 16l6-6 5 5 3-3 4 4M16 7h.01',
   photo: 'M4 4h16v16H4zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-5 13v-2a5 5 0 0 1 10 0v2',
 }
@@ -45,13 +54,14 @@ export function LocalFilesNote() {
 export function ToolNavigation({ selected, onSelect }: { selected: ToolId; onSelect: (tool: ToolId) => void }) {
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey) return
-    const index = TOOLS.findIndex((tool) => tool.id === selected)
-    const next = event.key === 'ArrowDown' ? (index + 1) % TOOLS.length
-      : event.key === 'ArrowUp' ? (index + TOOLS.length - 1) % TOOLS.length
-        : event.key === 'Home' ? 0 : event.key === 'End' ? TOOLS.length - 1 : null
+    const count = navigationTools.length
+    const index = navigationTools.findIndex((tool) => tool.id === selected)
+    const next = event.key === 'ArrowDown' ? (index + 1) % count
+      : event.key === 'ArrowUp' ? (index + count - 1) % count
+        : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null
     if (next === null) return
     event.preventDefault()
-    const id = TOOLS[next].id
+    const id = navigationTools[next].id
     onSelect(id)
     document.getElementById(`tab-${id}`)?.focus()
   }
