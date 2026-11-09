@@ -105,8 +105,9 @@ def fill_forms(file: UploadFile, values: Annotated[str, Form()], flatten: Annota
 
 
 @app.post("/api/forms/create")
-def create_forms(file: UploadFile, fields: Annotated[str, Form()], password: Annotated[str, Form()] = "") -> Response:
-    return _download(forms.create(file.file.read(), fields, file.filename or "document.pdf", password), f"{_stem(file.filename)}_form.pdf", "application/pdf")
+def create_forms(file: UploadFile, fields: Annotated[str, Form()], remove: Annotated[str, Form()] = "", password: Annotated[str, Form()] = "") -> Response:
+    """Add the `fields` (a JSON list, possibly empty) and remove the existing fields whose IDs are in `remove` (a JSON list)."""
+    return _download(forms.create(file.file.read(), fields, file.filename or "document.pdf", password, remove), f"{_stem(file.filename)}_form.pdf", "application/pdf")
 
 
 @app.post("/api/bookmarks/read")

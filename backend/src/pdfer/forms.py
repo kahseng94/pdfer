@@ -1,8 +1,9 @@
 """AcroForm values and explicit widget appearances; no JavaScript or XFA execution.
 
 `create` adds new text, checkbox, dropdown and radio fields to a PDF, with
-appearances written out so every viewer shows them, and leaves existing fields
-untouched. `read` and `fill` work on the fields a PDF has.
+appearances written out so every viewer shows them, and can remove existing
+fields by ID; the fields it does not touch keep their values and appearances.
+`read` and `fill` work on the fields a PDF has.
 
 Hybrid XFA forms also carry a complete AcroForm field tree, so they are filled
 through that tree and saved without the XFA layer. Dynamic XFA forms have no
@@ -120,6 +121,11 @@ def _display_box(frame, rect):
             "width": round(box.width * unit, 2), "height": round(box.height * unit, 2)}
 
 
+def _field_id(index):
+    """The ID `read` reports for the field at this position; `fill` and `create` take it back."""
+    return f"field-{index}"
+
+
 def _description(form, name, field, index, page_map, frames):
     widgets = _widgets(form, field)
     label = str(field.alternate_name or name or f"Field {index + 1}")
@@ -129,7 +135,7 @@ def _description(form, name, field, index, page_map, frames):
         if widget.objgen in page_map and rect is not None:
             number = page_map[widget.objgen]
             placed.append(({"page": number, **_display_box(frames[number - 1], rect)}, widget))
-    item = {"id": f"field-{index}", "name": name or label, "label": label,
+    item = {"id": _field_id(index), "name": name or label, "label": label,
             "pages": sorted({page_map[w.objgen] for w in widgets if w.objgen in page_map}),
             "required": field.is_required, "readOnly": field.is_read_only, "type": "unsupported", "value": "", "options": [], "reason": None}
     flags = int(field.flags)
@@ -346,10 +352,10 @@ def _plain(value, label, low, high):
     return value
 
 
-def _new_fields(spec, pdf, taken, existing):
+def _new_fields(spec, pdf, taken, existing, required=True):
     try: items = json.loads(spec)
     except ValueError: raise core.PdfToolError("Form fields must be valid JSON.") from None
-    if not isinstance(items, list) or not 1 <= len(items) <= 500:
+    if not isinstance(items, list) or not (0 if not required else 1) <= len(items) <= 500:
         raise core.PdfToolError("Provide a list of 1 to 500 form fields.")
     frames, entries = {}, []
     for index, item in enumerate(items, 1):
@@ -445,17 +451,69 @@ def _toggle_appearance(pdf, widget, radio, on):
     return appearance
 
 
-def create(data: bytes, spec: str, name="file", password="") -> bytes:
-    """Add new fields; the PDF's existing fields, values and appearances are left as they are."""
+def _removals(spec):
+    """The IDs of fields to remove, as `read` reported them."""
+    if not spec:
+        return []
+    try: ids = json.loads(spec)
+    except ValueError: raise core.PdfToolError("Fields to remove must be valid JSON.") from None
+    if not isinstance(ids, list) or len(ids) > 500 or not all(isinstance(identifier, str) for identifier in ids):
+        raise core.PdfToolError("Provide a list of up to 500 field IDs to remove.")
+    return list(dict.fromkeys(ids))
+
+
+def _remove_fields(pdf, form, chosen):
+    """Take the chosen fields out of the field tree and their widgets off the pages.
+
+    A radio group goes with all its buttons, and a field shown on several pages
+    with all its widgets. Parents left without children go too.
+    """
+    acro = pdf.Root.AcroForm
+    gone = set()
+    for field in chosen:
+        gone.update(widget.objgen for widget in _widgets(form, field))
+        node = field.obj
+        while node.is_indirect:
+            gone.add(node.objgen)
+            parent = node.get("/Parent")
+            if parent is None:
+                acro.Fields = pikepdf.Array([other for other in acro.get("/Fields", []) if other.objgen != node.objgen])
+                break
+            parent.Kids = pikepdf.Array([other for other in parent.get("/Kids", []) if other.objgen != node.objgen])
+            if len(parent.Kids):
+                break
+            node = parent
+    for page in pdf.pages:
+        if "/Annots" in page.obj:
+            page.obj.Annots = pikepdf.Array([annot for annot in page.obj.Annots if annot.objgen not in gone])
+    if "/CO" in acro:
+        acro.CO = pikepdf.Array([other for other in acro.CO if other.objgen not in gone])
+
+
+def create(data: bytes, spec: str, name="file", password="", remove="") -> bytes:
+    """Add new fields and remove the fields whose IDs are in `remove`; other fields keep their values and appearances."""
     with core._open(data, name, password) as pdf:
         if _signed(pdf):
             raise core.PdfToolError("This PDF contains a digital signature. Use an unsigned copy before adding form fields.")
-        _form, fields = _fields(pdf)
+        form, fields = _fields(pdf)
+        by_id = {_field_id(index): (field_name, field) for index, (field_name, field) in enumerate(fields)}
+        removals = _removals(remove)
+        if any(identifier not in by_id for identifier in removals):
+            raise core.PdfToolError("A form field could not be found. Reopen the PDF.")
+        removed_names = {by_id[identifier][0] for identifier in removals}
         top = pdf.Root.get("/AcroForm", {}).get("/Fields", [])
-        taken = {field_name for field_name, _ in fields} | {str(node.T) for node in top if "/T" in node}
-        entries = _new_fields(spec, pdf, taken, len(fields))
-        acro = _acroform(pdf)
+        # A removed field's name is free for a new one.
+        taken = ({field_name for field_name, _ in fields} | {str(node.T) for node in top if "/T" in node}) - removed_names
+        entries = _new_fields(spec, pdf, taken, len(fields) - len(removals), required=not removals)
+        if removals:
+            _remove_fields(pdf, form, [by_id[identifier][1] for identifier in removals])
         original_pages = len(pdf.pages)
+        if not entries:
+            if "/AcroForm" in pdf.Root and not len(pdf.Root.AcroForm.get("/Fields", [])):
+                del pdf.Root.AcroForm  # nothing fillable is left, so no form at all
+            _drop_xfa_and_usage_rights(pdf)
+            return core._save(pdf, password if pdf.is_encrypted else "")
+        acro = _acroform(pdf)
         painter = core._Painter(pdf, ())
         groups = {}
         for entry in entries:

@@ -4,7 +4,7 @@
 // origin is the top-left corner and y runs down. The backend turns them into
 // widget rectangles, so nothing here needs to know about page rotation.
 
-import type { PdfSize } from './documentTools'
+import type { FormField, PdfSize } from './documentTools'
 import { clampPoint, constrainBox, resized, roundedBox, type Box, type Handle } from './edits'
 
 export type FieldType = 'text' | 'checkbox' | 'choice' | 'radio'
@@ -31,6 +31,17 @@ export type FieldSpec = Box & {
   type: FieldType; name: string; page: number; label?: string; required?: boolean
   multiline?: boolean; maxLength?: number; options?: string[]; editable?: boolean; option?: string
 }
+
+/** One of the PDF's own fields marked for removal. It shares the undo history with the new fields. */
+export type RemovedField = { id: string; kind: 'removed'; fieldId: string; name: string }
+export type BuilderItem = DraftField | RemovedField
+export const isRemoved = (item: BuilderItem): item is RemovedField => 'kind' in item && item.kind === 'removed'
+export const isDraft = (item: BuilderItem): item is DraftField => !isRemoved(item)
+export function removal(field: Pick<FormField, 'id' | 'name'>): RemovedField {
+  return { id: `removed:${field.id}`, kind: 'removed', fieldId: field.id, name: field.name }
+}
+/** How the PDF's own fields are described; radio buttons are always a group. */
+export const EXISTING_LABELS: Record<FormField['type'], string> = { text: 'Text box', checkbox: 'Checkbox', choice: 'Dropdown', radio: 'Radio group', unsupported: 'Field' }
 
 export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: 'text', label: 'Text box' },

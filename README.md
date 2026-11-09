@@ -226,13 +226,20 @@ Preview and browsers can fill. Fields line up with what you drew on
 rotated and cropped pages too.
 
 If the PDF already has a form, its fields, values and appearances are
-kept unchanged and shown as grey outlines; new fields are added alongside
-them and cannot reuse their names. A form can have up to 500 fields in
+kept unchanged and shown as grey dashed outlines; new fields are added
+alongside them and cannot reuse their names. To take a field out, choose
+**Select**, click its outline (or pick it under **Existing fields**) and
+press **Delete**. The field is crossed out in red, its name becomes free
+for a new field, and the saved copy has neither the field nor its boxes: a
+radio group goes with all its buttons, and a field shown on several pages
+with every one of its boxes. Whatever is printed on the page underneath
+stays. Deletions can be undone and restored, and a PDF whose last field is
+deleted is saved with no form at all. A form can have up to 500 fields in
 total. Signed PDFs must be replaced by an unsigned copy first, dynamic XFA
 forms are rejected, and the XFA layer of a hybrid XFA form is removed so
 viewers use the standard fields. Protected inputs retain their opening
 password. Detecting fields automatically, signature, date and button
-fields, and editing existing fields are not supported.
+fields, and changing an existing field's settings are not supported.
 
 ### Bookmarks
 
@@ -984,6 +991,7 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/organize` | `file`, `pages`, optional `layout` (JSON), optional `password` | `<name>_organized.pdf`, used for preview and download |
 | `POST /api/forms/read` | `file`, optional `password` | field IDs, values, types, options, page locations and read-only/signature status |
 | `POST /api/forms/fill` | `file`, `values` (JSON object keyed by field ID), optional `flatten` (default false), optional `password` | `<name>_filled.pdf` |
+| `POST /api/forms/create` | `file`, `fields` (JSON array of new fields, may be empty when removing), optional `remove` (JSON array of field IDs to delete), optional `password` | `<name>_form.pdf` |
 | `POST /api/bookmarks/read` | `file`, optional `password` | bookmark titles, source IDs, destination pages and nesting levels |
 | `POST /api/bookmarks` | `file`, `entries` (JSON array), optional `password` | `<name>_bookmarks.pdf` |
 | `POST /api/metadata/read` | `file`, optional `password` | XMP and DocumentInfo values, conflicts, read-only fields, store presence and editability warnings |

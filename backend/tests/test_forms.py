@@ -319,3 +319,93 @@ def test_read_reports_where_each_widget_is_and_which_option_it_turns_on():
     assert [box["option"] for box in fields["plan"]["boxes"]] == ["alpha", "beta"]
     assert fields["consent"]["boxes"] == [{"page": 1, "x": 30, "y": 372, "width": 20, "height": 20, "option": "Yes"}]
     assert "option" not in fields["country"]["boxes"][0]
+
+
+def ids_for(source, names):
+    return [field["id"] for field in forms.read(source)["fields"] if field["name"] in names]
+
+
+def test_create_removes_fields_with_all_their_widgets_and_frees_their_names():
+    source = form_pdf()
+    assert {field["name"] for field in forms.read(source)["fields"]} == {"name", "notes", "country", "consent", "plan", "readonly"}
+    remove = ids_for(source, ["name", "plan", "notes"])
+    result = forms.create(source, json.dumps([new_field("text", "notes", y=700)]), remove=json.dumps(remove))
+    after = {field["name"]: field for field in forms.read(result)["fields"]}
+    assert set(after) == {"notes", "country", "consent", "readonly"}
+    assert after["notes"]["value"] == "" and after["notes"]["boxes"] == [{"page": 1, "x": 50, "y": 700, "width": 200, "height": 24}]
+    assert after["country"]["value"] == "ca" and after["consent"]["value"] is False and after["readonly"]["value"] == "Read only"
+    with pikepdf.open(BytesIO(source)) as original, pikepdf.open(BytesIO(result)) as pdf:
+        assert not pdf.check_pdf_syntax()
+        # Both widgets of the two-page "name" field, both radio buttons and the old notes box are gone; the link stays.
+        assert len(pdf.pages[0].Annots) == len(original.pages[0].Annots) - 4 + 1
+        assert [str(annot.Subtype) for annot in pdf.pages[0].Annots].count("/Link") == 1
+        assert len(pdf.pages[1].Annots) == 0
+        assert {str(field.T) for field in pdf.Root.AcroForm.Fields} == {"notes", "country", "consent", "readonly"}
+
+
+def test_create_can_only_remove_and_drops_a_form_left_without_fields():
+    source = form_pdf()
+    everything = [field["id"] for field in forms.read(source)["fields"]]
+    result = forms.create(source, "[]", remove=json.dumps(everything))
+    assert forms.read(result)["fields"] == []
+    with pikepdf.open(BytesIO(result)) as pdf:
+        assert "/AcroForm" not in pdf.Root
+        assert [str(annot.Subtype) for annot in pdf.pages[0].Annots] == ["/Link"]
+        assert len(pdf.pages[1].Annots) == 0
+    some = forms.create(source, "[]", remove=json.dumps(everything[:1]))
+    with pikepdf.open(BytesIO(some)) as pdf:
+        assert len(pdf.Root.AcroForm.Fields) == len(everything) - 1
+    with pytest.raises(core.PdfToolError, match="1 to 500"):
+        forms.create(source, "[]")
+    protected = forms.create(form_pdf(password="secret"), "[]", password="secret", remove=json.dumps(everything[:1]))
+    assert len(forms.read(protected, password="secret")["fields"]) == len(everything) - 1
+
+
+def test_create_prunes_parents_left_without_children_and_keeps_siblings():
+    with pikepdf.open(BytesIO(blank_pdf())) as pdf:
+        page = pdf.pages[0]
+        parent = pdf.make_indirect(pikepdf.Dictionary(T="address", Kids=pikepdf.Array()))
+        kids = []
+        for index, label in enumerate(("street", "city")):
+            kid = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget, FT=pikepdf.Name.Tx, T=label, Parent=parent,
+                                                       Rect=[30, 700 - 40 * index, 300, 730 - 40 * index], P=page.obj))
+            parent.Kids.append(kid)
+            kids.append(kid)
+        page.Annots = pikepdf.Array(kids)
+        pdf.Root.AcroForm = pikepdf.Dictionary(Fields=pikepdf.Array([parent]), CO=pikepdf.Array([kids[0]]))
+        source = core._save(pdf)
+    names = {field["name"]: field["id"] for field in forms.read(source)["fields"]}
+    assert set(names) == {"address.street", "address.city"}
+    one = forms.create(source, "[]", remove=json.dumps([names["address.street"]]))
+    assert [field["name"] for field in forms.read(one)["fields"]] == ["address.city"]
+    with pikepdf.open(BytesIO(one)) as pdf:
+        assert len(pdf.Root.AcroForm.Fields) == 1 and len(pdf.Root.AcroForm.Fields[0].Kids) == 1
+        assert len(pdf.Root.AcroForm.CO) == 0 and len(pdf.pages[0].Annots) == 1
+    both = forms.create(source, "[]", remove=json.dumps(list(names.values())))
+    with pikepdf.open(BytesIO(both)) as pdf:
+        assert "/AcroForm" not in pdf.Root and len(pdf.pages[0].Annots) == 0
+
+
+def test_create_rejects_unknown_or_malformed_removals_and_counts_the_remaining_fields():
+    source = form_pdf()
+    with pytest.raises(core.PdfToolError, match="could not be found"):
+        forms.create(source, "[]", remove=json.dumps(["field-99"]))
+    with pytest.raises(core.PdfToolError, match="valid JSON"):
+        forms.create(source, "[]", remove="nope")
+    with pytest.raises(core.PdfToolError, match="up to 500 field IDs"):
+        forms.create(source, "[]", remove=json.dumps([1]))
+    many = json.dumps([new_field("checkbox", f"Box {i}", width=10, height=10) for i in range(495)])
+    with pytest.raises(core.PdfToolError, match="at most 500"):
+        forms.create(source, many)
+    assert len(forms.read(forms.create(source, many, remove=json.dumps(ids_for(source, ["notes"]))))["fields"]) == 500
+
+
+def test_api_form_create_removes_fields():
+    source = form_pdf()
+    response = TestClient(app).post('/api/forms/create', files={'file': ('form.pdf', source, 'application/pdf')},
+                                    data={'fields': '[]', 'remove': json.dumps(ids_for(source, ["plan"]))})
+    assert response.status_code == 200
+    assert 'form_form.pdf' in response.headers['content-disposition']
+    assert "plan" not in {field["name"] for field in forms.read(response.content)["fields"]}
+    bad = TestClient(app).post('/api/forms/create', files={'file': ('form.pdf', source, 'application/pdf')}, data={'fields': '[]', 'remove': json.dumps(["field-9"])})
+    assert bad.status_code == 400 and "could not be found" in bad.json()['detail']

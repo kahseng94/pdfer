@@ -13,10 +13,15 @@ type Drag =
 export type FieldEditor = {
   create: (box: Box) => void
   select: (id: string | null) => void
+  /** Pick one of the PDF's own fields, so it can be deleted. */
+  selectExisting: (id: string) => void
   begin: () => void
   change: (id: string, box: Box) => void
   end: (changed: boolean) => void
 }
+
+/** Where one widget of one of the PDF's own fields sits, and how the tool is treating that field. */
+export type ExistingBox = Box & { id: string; name: string; removed: boolean; selected: boolean }
 
 const handlePoint = (box: Box, handle: Handle): [number, number] => [
   box.x + (handle.includes('w') ? 0 : handle.includes('e') ? box.width : box.width / 2),
@@ -25,7 +30,7 @@ const handlePoint = (box: Box, handle: Handle): [number, number] => [
 const CURSORS: Record<Handle, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' }
 
 export function FormBuilderPage({ doc, page, size, fields, existing, tool, selectedId, disabled, editor }: {
-  doc: PDFDocumentProxy; page: number; size: PdfSize; fields: readonly DraftField[]; existing: readonly (Box & { name: string })[]
+  doc: PDFDocumentProxy; page: number; size: PdfSize; fields: readonly DraftField[]; existing: readonly ExistingBox[]
   tool: BuilderTool; selectedId: string | null; disabled: boolean; editor: FieldEditor
 }) {
   const [container, width] = useElementWidth<HTMLDivElement>()
@@ -51,6 +56,7 @@ export function FormBuilderPage({ doc, page, size, fields, existing, tool, selec
     const target = event.target as Element
     const handle = target.closest('[data-handle]')?.getAttribute('data-handle') as Handle | undefined
     const id = target.closest('[data-id]')?.getAttribute('data-id')
+    const existingId = target.closest('[data-existing]')?.getAttribute('data-existing')
     const selected = fields.find((field) => field.id === selectedId)
     if (handle && selected) {
       editor.begin()
@@ -59,6 +65,8 @@ export function FormBuilderPage({ doc, page, size, fields, existing, tool, selec
       const field = fields.find((item) => item.id === id)!
       editor.select(id); editor.begin()
       drag.current = { kind: 'move', id: event.pointerId, ...at, field: id, origin: field, moved: false }
+    } else if (existingId && tool === 'select') {
+      editor.selectExisting(existingId)
     } else if (tool === 'select') {
       editor.select(null)
     } else {
@@ -89,7 +97,7 @@ export function FormBuilderPage({ doc, page, size, fields, existing, tool, selec
     }
   }
   const selected = fields.find((field) => field.id === selectedId)
-  const label = tool === 'select' ? 'Click a field to select it, drag to move it, or drag a handle to resize it.' : `Click or drag to add a ${TYPE_LABELS[tool].toLowerCase()}.`
+  const label = tool === 'select' ? 'Click a field to select it, drag to move it, or drag a handle to resize it. Click one of the PDF’s own fields to delete it.' : `Click or drag to add a ${TYPE_LABELS[tool].toLowerCase()}.`
   return <div ref={container} className="space-y-2">
     {error && <p role="alert" className="text-sm text-red-600">Could not render this page: {error}</p>}
     {!ready && !error && <p role="status" className="text-sm text-zinc-500">Rendering page…</p>}
@@ -99,7 +107,14 @@ export function FormBuilderPage({ doc, page, size, fields, existing, tool, selec
         onPointerDown={start} onPointerMove={move} onPointerUp={(event) => finish(event)} onPointerCancel={(event) => finish(event, true)}
         onKeyDown={(event) => { if (event.key === 'Escape' && drag.current?.kind === 'draw') { drag.current = null; setDraft(null) } }}
         className={`absolute inset-0 h-full w-full touch-none focus:outline-2 focus:outline-rose-500 ${tool === 'select' ? 'cursor-default' : 'cursor-crosshair'}`}>
-        {existing.map((box, index) => <rect key={index} x={box.x} y={box.y} width={box.width} height={box.height} fill="#71717a" fillOpacity={0.08} stroke="#71717a" strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" pointerEvents="none"><title>Existing field: {box.name}</title></rect>)}
+        {/* The PDF's own fields: grey until selected, crossed out in red once marked for removal. Only the Select tool can pick them. */}
+        {existing.map((box, index) => <g key={index} data-existing={box.id} pointerEvents={tool === 'select' ? 'auto' : 'none'} className={tool === 'select' ? 'cursor-pointer' : undefined}>
+          <rect x={box.x} y={box.y} width={box.width} height={box.height}
+            fill={box.removed ? '#e11d48' : box.selected ? '#3f3f46' : '#71717a'} fillOpacity={box.selected ? 0.18 : box.removed ? 0.1 : 0.08}
+            stroke={box.removed ? '#e11d48' : box.selected ? '#18181b' : '#71717a'} strokeWidth={box.selected ? 2 : 1} strokeDasharray={box.selected && !box.removed ? undefined : '4 3'} vectorEffect="non-scaling-stroke" />
+          {box.removed && <line x1={box.x} y1={box.y} x2={box.x + box.width} y2={box.y + box.height} stroke="#e11d48" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+          <title>{box.removed ? 'Deleted field' : 'Existing field'}: {box.name}</title>
+        </g>)}
         {fields.map((field) => {
           const active = field.id === selectedId
           const round = field.type === 'radio' ? Math.min(field.width, field.height) / 2 : 0

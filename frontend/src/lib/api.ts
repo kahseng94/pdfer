@@ -76,8 +76,10 @@ export function fillForms(file: File, values: Record<string, FormValue>, flatten
   body.append('values', JSON.stringify(values)); body.append('flatten', String(flatten))
   return post('/api/forms/fill', body, 'filled.pdf', pdfPassword(file), signal)
 }
-export function createFormFields(file: File, fields: readonly FieldSpec[], signal?: AbortSignal): Promise<File> {
+/** Add `fields` and remove the existing fields whose IDs (as `readForms` reports them) are in `remove`. */
+export function createFormFields(file: File, fields: readonly FieldSpec[], signal?: AbortSignal, remove: readonly string[] = []): Promise<File> {
   const body = pdfBody(file); body.append('fields', JSON.stringify(fields))
+  if (remove.length) body.append('remove', JSON.stringify(remove))
   return post('/api/forms/create', body, 'form.pdf', pdfPassword(file), signal)
 }
 export function writeBookmarks(file: File, entries: readonly BookmarkEntry[], signal?: AbortSignal): Promise<File> {

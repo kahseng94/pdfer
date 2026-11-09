@@ -71,7 +71,7 @@ it('draws a text box, renames it and previews the fields it describes', async ()
   await type('Field name', 'Full name')
   await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
   await click('Preview fillable PDF')
-  expect(mocks.create).toHaveBeenCalledWith(expect.any(File), [{ type: 'text', name: 'Full name', page: 1, x: 20, y: 40, width: 160, height: 22, required: true }], expect.any(AbortSignal))
+  expect(mocks.create).toHaveBeenCalledWith(expect.any(File), [{ type: 'text', name: 'Full name', page: 1, x: 20, y: 40, width: 160, height: 22, required: true }], expect.any(AbortSignal), [])
   expect(container.textContent).toContain('Output preview')
 })
 
@@ -120,4 +120,65 @@ it('outlines existing fields, refuses their names, and locks a signed PDF', asyn
   await open(schema({ signed: true }))
   expect(container.textContent).toContain('digital signature')
   expect(container.querySelector('fieldset')!.disabled).toBe(true)
+})
+
+const textField = { id: 'field-0', name: 'Text 1', label: 'Text 1', pages: [1], required: false, readOnly: false, type: 'text' as const, value: '', options: [], reason: null, boxes: [{ page: 1, x: 10, y: 200, width: 80, height: 20 }] }
+const radioGroup = { ...textField, id: 'field-1', name: 'Plan', label: 'Plan', type: 'radio' as const, boxes: [{ page: 1, x: 10, y: 250, width: 14, height: 14, option: 'A' }, { page: 1, x: 40, y: 250, width: 14, height: 14, option: 'B' }] }
+const existingTitle = (id: string) => svg().querySelector(`[data-existing="${id}"] title`)!.textContent
+/** A click on one of the PDF's own fields lands on its outline, as it does in a browser. */
+const tapExisting = (id: string, x: number, y: number) => pointer(svg().querySelector(`[data-existing="${id}"] rect`)!, [['pointerdown', x, y], ['pointerup', x, y]])
+
+it('deletes a selected existing field, frees its name for a new one, and sends the removal with the new fields', async () => {
+  await open(schema({ fields: [textField, radioGroup] }))
+  expect(button('Preview fillable PDF').disabled).toBe(true)
+  // Existing fields cannot be picked while drawing, only with Select.
+  await tapExisting('field-0', 50, 210)
+  expect(container.querySelector('[aria-label="Existing field"]')).toBeNull()
+  expect(container.textContent).toContain('1 new field')
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })))
+  await click('Select')
+  await tapExisting('field-0', 50, 210)
+  const panel = container.querySelector('[aria-label="Existing field"]')!
+  expect(panel.textContent).toContain('Existing text box')
+  expect(panel.textContent).toContain('Text 1')
+  await click('Delete this field')
+  expect(container.textContent).toContain('1 removed')
+  expect(existingTitle('field-0')).toBe('Deleted field: Text 1')
+  expect(existingTitle('field-1')).toBe('Existing field: Plan')
+  expect(container.querySelector('[aria-label="Existing field"]')!.textContent).toContain('Deleted from the saved copy')
+  expect(button('Preview without the removed fields').disabled).toBe(false)
+  // The freed name no longer clashes with a new field.
+  await click('Text box')
+  await drag(20, 40, 180, 62)
+  await type('Field name', 'Text 1')
+  expect(container.textContent).not.toContain('already has a field with that name')
+  await click('Preview fillable PDF')
+  expect(mocks.create).toHaveBeenCalledWith(expect.any(File), [expect.objectContaining({ type: 'text', name: 'Text 1' })], expect.any(AbortSignal), ['field-0'])
+  expect(container.textContent).toContain('Output preview')
+})
+
+it('deletes a radio group as a whole with the keyboard, undoes it, and restores from the list', async () => {
+  await open(schema({ fields: [textField, radioGroup] }))
+  await click('Select')
+  await tapExisting('field-1', 15, 255)
+  expect(container.querySelector('[aria-label="Existing field"]')!.textContent).toContain('Existing radio group')
+  expect(container.querySelector('[aria-label="Existing field"]')!.textContent).toContain('2 buttons')
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' })))
+  expect(container.textContent).toContain('1 removed')
+  expect(svg().querySelectorAll('[data-existing="field-1"] line')).toHaveLength(2)
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))) // already deleted: nothing more happens
+  expect(container.textContent).toContain('1 removed')
+  await click('Undo')
+  expect(container.textContent).not.toContain('removed')
+  expect(svg().querySelectorAll('[data-existing="field-1"] line')).toHaveLength(0)
+  await click('Redo')
+  await click('Delete existing field Text 1')
+  expect(container.textContent).toContain('2 removed')
+  await click('Preview without the removed fields')
+  expect(mocks.create).toHaveBeenCalledWith(expect.any(File), [], expect.any(AbortSignal), ['field-1', 'field-0'])
+  await click('Restore Plan')
+  expect(container.textContent).toContain('1 removed')
+  expect(existingTitle('field-1')).toBe('Existing field: Plan')
+  await click('Restore Text 1')
+  expect(button('Preview fillable PDF').disabled).toBe(true)
 })
