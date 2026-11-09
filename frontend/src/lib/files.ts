@@ -4,7 +4,7 @@ import { MAX_OFFICE_BYTES, OFFICE_FORMATS, type OfficeKind } from './office'
 import { MAX_CSV_BYTES, MAX_WORKBOOK_BYTES } from './spreadsheets'
 import { MAX_MARKDOWN_BYTES } from './markdown'
 
-export type FileKind = 'pdf' | 'image' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'xlsx' | 'csv' | 'sheet' | 'markdown' | 'compressible'
+export type FileKind = 'pdf' | 'image' | 'photo' | 'png' | 'jpg' | 'word' | 'excel' | 'powerpoint' | 'xlsx' | 'csv' | 'sheet' | 'markdown' | 'compressible'
 
 type KindSpec = {
   /** The `accept` attribute for a file input. */
@@ -32,6 +32,15 @@ const IMAGE: KindSpec = {
   is: (f) => f.type === 'image/jpeg' || f.type === 'image/png' || /\.(jpe?g|png)$/i.test(f.name),
 }
 
+/** Everything the photo tools open; the backend reads them all, the browser previews all but TIFF and HEIC. */
+const PHOTO: KindSpec = {
+  accept: 'image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif',
+  formatHint: 'JPG, PNG, WebP, GIF, BMP, TIFF, AVIF and HEIC images',
+  one: 'a photo',
+  many: 'photos',
+  is: (f) => /^image\/(jpeg|png|webp|gif|bmp|tiff|avif|heic|heif)$/.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|tiff?|avif|heic|heif)$/i.test(f.name),
+}
+
 /** Workbooks the spreadsheet tools read themselves, without LibreOffice. */
 const XLSX: KindSpec = {
   accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12',
@@ -52,6 +61,7 @@ function officeFormatHint(kind: OfficeKind) {
 export const FILE_KINDS: Record<FileKind, KindSpec> = {
   pdf: PDF,
   image: IMAGE,
+  photo: PHOTO,
   png: {
     accept: 'image/png,.png', one: 'a PNG image', many: 'PNG images',
     formatHint: 'PNG images (.png)',

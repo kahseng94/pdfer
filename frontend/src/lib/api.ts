@@ -12,6 +12,7 @@ import { validatePdfTarget } from './pdfTarget'
 import type { OfficeKind, OfficeStatus } from './office'
 import type { SheetView } from './sheetView'
 import { parseSummary, type CsvDelimiter, type CsvSummary, type WorkbookSheets, type WorkbookSummary } from './spreadsheets'
+import { parsePhotoResults, type PhotoEdit, type PhotoInfo, type PhotoResult } from './photoEdits'
 
 export type SplitMode = 'ranges' | 'each' | 'extract'
 
@@ -327,6 +328,25 @@ export async function photoSheet(file: File, crop: Crop, photoMm: Size, paper: P
   body.append('paper', paper)
   const { file: sheet, headers } = await upload('/api/photo-sheet', body, 'passport_sheet.pdf')
   return { file: sheet, copies: Number(headers.get('x-copies')) || 0 }
+}
+
+/**
+ * Give every photo the same edit. Resolves to the photo itself for one file,
+ * a zip for several, and what each came out as, in the order given.
+ */
+export async function editPhotos(files: File[], edit: PhotoEdit, signal?: AbortSignal): Promise<{ file: File; results: PhotoResult[] }> {
+  const body = new FormData()
+  for (const f of files) body.append('files', f)
+  body.append('edit', JSON.stringify(edit))
+  const { file, headers } = await upload('/api/photos/edit', body, files.length === 1 ? 'photo.jpg' : 'photos.zip', signal)
+  return { file, results: parsePhotoResults(headers.get('x-results'), files) }
+}
+
+/** What a photo is and records: size, camera, exposure, location and the metadata it carries. */
+export function readPhotoInfo(file: File, signal?: AbortSignal): Promise<PhotoInfo> {
+  const body = new FormData()
+  body.append('file', file)
+  return postForJson('/api/photos/info', body, 'Could not read the photo', signal)
 }
 
 export type ImageFormat = 'keep' | 'jpeg' | 'png' | 'webp'

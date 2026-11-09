@@ -25,6 +25,16 @@ describe('pickFiles', () => {
     expect(skipped).toBe(1)
   })
 
+  it('takes every photo format for the photo tools, iPhone HEIC included', () => {
+    const all = [
+      file('a.jpg'), file('b.webp'), file('c.tif'), file('d.avif', 'image/avif'), file('IMG_0001.HEIC'), file('e.heif'),
+      file('shot', 'image/heic'), file('f.svg', 'image/svg+xml'), file('g.pdf', 'application/pdf'),
+    ]
+    const { wanted, skipped } = pickFiles(all, 'photo')
+    expect(wanted.map((f) => f.name)).toEqual(['a.jpg', 'b.webp', 'c.tif', 'd.avif', 'IMG_0001.HEIC', 'e.heif', 'shot'])
+    expect(skipped).toBe(2)
+  })
+
   it('handles an empty list', () => {
     expect(pickFiles([], 'pdf')).toEqual({ wanted: [], skipped: 0 })
   })

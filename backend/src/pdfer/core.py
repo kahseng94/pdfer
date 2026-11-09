@@ -1766,6 +1766,11 @@ def parse_photo_crop(spec: str) -> PhotoCrop:
         raw = json.loads(spec)
     except ValueError:
         raise PdfToolError("The crop isn't valid JSON.") from None
+    return photo_crop_from(raw)
+
+
+def photo_crop_from(raw: object) -> PhotoCrop:
+    """A crop from an already decoded JSON value; see `parse_photo_crop`."""
     if not isinstance(raw, dict):
         raise PdfToolError("The crop must be a JSON object.")
     values: dict[str, float] = {}

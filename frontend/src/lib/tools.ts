@@ -31,7 +31,13 @@ export const TOOLS = [
   { id: 'excel-csv', label: 'Excel to CSV', takes: 'xlsx' },
   { id: 'csv-excel', label: 'CSV to Excel', takes: 'csv' },
   { id: 'markdown', label: 'Markdown editor', takes: 'markdown' },
-  { id: 'photo', label: 'Photo', takes: 'image' },
+  { id: 'photo-resize', label: 'Resize photos', takes: 'photo' },
+  { id: 'photo-crop', label: 'Crop photo', takes: 'photo' },
+  { id: 'photo-rotate', label: 'Rotate & flip', takes: 'photo' },
+  { id: 'photo-convert', label: 'Convert images', takes: 'photo' },
+  { id: 'photo-adjust', label: 'Adjust photo', takes: 'photo' },
+  { id: 'photo-info', label: 'Photo details', takes: 'photo' },
+  { id: 'photo', label: 'Passport photo', takes: 'image' },
 ] as const satisfies readonly { id: string; label: string; takes: FileKind }[]
 
 export type Tool = (typeof TOOLS)[number]

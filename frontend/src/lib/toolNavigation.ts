@@ -29,6 +29,12 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   'excel-csv': { title: 'Excel to CSV', description: 'Save a worksheet, or every sheet, as CSV text that other apps can import.' },
   'csv-excel': { title: 'CSV to Excel', description: 'Turn CSV files into a workbook with real numbers and dates, one sheet per file.' },
   markdown: { title: 'Markdown editor', description: 'Write or open a Markdown file and see it formatted as you type.' },
+  'photo-resize': { title: 'Resize photos', description: 'Scale photos to a width, height, box or percentage, one or many at a time.' },
+  'photo-crop': { title: 'Crop a photo', description: 'Cut out part of a photo with a free or fixed-ratio frame, after turning or flipping it.' },
+  'photo-rotate': { title: 'Rotate & flip photos', description: 'Turn photos in quarter turns or mirror them, all at once.' },
+  'photo-convert': { title: 'Convert images', description: 'Save photos as JPEG, PNG or WebP, choosing the quality and the colour behind transparency.' },
+  'photo-adjust': { title: 'Adjust a photo', description: 'Change brightness, contrast, saturation and sharpness, or make a photo black and white.' },
+  'photo-info': { title: 'Photo details', description: 'See a photo’s camera, exposure and location data, and remove it before sharing.' },
   photo: { title: 'Passport photo', description: 'Crop and size a photo for a passport or visa.' },
 }
 

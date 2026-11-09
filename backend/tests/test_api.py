@@ -367,3 +367,71 @@ def test_compress_images_unreadable_is_400(client):
     )
     assert res.status_code == 400
     assert res.json() == {"detail": "notes.txt isn't an image pdfer can read."}
+
+
+def test_photos_edit_one(client):
+    name, data, _ = noisy_jpeg()
+    res = client.post(
+        "/api/photos/edit",
+        files=[("files", (name, data, "image/jpeg"))],
+        data={"edit": json.dumps({"resize": {"width": 200}, "suffix": "resized"})},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/jpeg"
+    assert 'filename="photo_resized.jpg"' in res.headers["content-disposition"]
+    assert Image.open(BytesIO(res.content)).size == (200, 200)
+    assert json.loads(res.headers["x-results"]) == [
+        {"name": "photo_resized.jpg", "before": len(data), "after": len(res.content), "width": 200, "height": 200}
+    ]
+
+
+def test_photos_edit_several_returns_zip(client):
+    files = [("files", noisy_jpeg("a.jpg")), ("files", noisy_jpeg("a.jpg")), ("files", noisy_jpeg("ü b.jpg", 300))]
+    res = client.post("/api/photos/edit", files=files, data={"edit": json.dumps({"format": "png", "suffix": ""})})
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/zip"
+    assert 'filename="photos_edited.zip"' in res.headers["content-disposition"]
+    assert list(unzip(res.content)) == ["a.png", "a (2).png", "ü b.png"]
+    results = json.loads(res.headers["x-results"])
+    assert [r["name"] for r in results] == ["a.png", "a.png", "%C3%BC%20b.png"]
+    assert [(r["width"], r["height"]) for r in results] == [(800, 800), (800, 800), (300, 300)]
+
+
+def test_photos_edit_bad_edit_is_400(client):
+    res = client.post("/api/photos/edit", files=[("files", noisy_jpeg())], data={"edit": '{"rotate": 45}'})
+    assert res.status_code == 400
+    assert res.json() == {"detail": "rotate must be 0, 90, 180 or 270."}
+
+
+def test_photos_edit_bad_suffix_is_400(client):
+    res = client.post("/api/photos/edit", files=[("files", noisy_jpeg())], data={"edit": '{"suffix": "../x"}'})
+    assert res.status_code == 400
+    assert res.json()["detail"].startswith("suffix may only have")
+
+
+def test_photos_edit_zip_is_named_after_the_suffix(client):
+    files = [("files", noisy_jpeg("a.jpg", 100)), ("files", noisy_jpeg("b.jpg", 100))]
+    res = client.post("/api/photos/edit", files=files, data={"edit": json.dumps({"rotate": 90, "suffix": "rotated"})})
+    assert 'filename="photos_rotated.zip"' in res.headers["content-disposition"]
+    assert list(unzip(res.content)) == ["a_rotated.jpg", "b_rotated.jpg"]
+
+
+def test_photos_edit_unreadable_is_400(client):
+    res = client.post("/api/photos/edit", files=[("files", ("notes.txt", b"hello", "text/plain"))], data={"edit": "{}"})
+    assert res.status_code == 400
+    assert res.json() == {"detail": "notes.txt isn't an image pdfer can read."}
+
+
+def test_photos_info(client):
+    res = client.post("/api/photos/info", files={"file": quadrant_photo()})
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "no-store"
+    info = res.json()
+    assert (info["name"], info["format"], info["width"], info["height"]) == ("IMG_0001.jpg", "JPEG", 400, 300)
+    assert info["gps"] is None and info["camera"]["make"] is None
+
+
+def test_photos_info_unreadable_is_400(client):
+    res = client.post("/api/photos/info", files={"file": ("notes.txt", b"hello", "text/plain")})
+    assert res.status_code == 400
+    assert res.json() == {"detail": "notes.txt isn't an image pdfer can read."}

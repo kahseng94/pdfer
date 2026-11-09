@@ -18,8 +18,11 @@ if (tessdata / "pdf.ttf").is_file():
 for name in ("configs", "tessconfigs"):
     if (tessdata / name).is_dir():
         datas.append((str(tessdata / name), "tessdata/" + name))
-for package in ("pikepdf", "Pillow", "fonttools", "img2pdf", "openpyxl", "et_xmlfile", "fastapi", "uvicorn"):
+for package in ("pikepdf", "Pillow", "pi_heif", "fonttools", "img2pdf", "openpyxl", "et_xmlfile", "fastapi", "uvicorn"):
     datas += copy_metadata(package)
+# HEIC photos need libheif with its HEVC decoder, which pi-heif's wheels carry themselves and PyInstaller's binary
+# analysis follows from the _pi_heif extension: pi_heif/.dylibs on macOS, DLLs beside the .pyd on Windows, and the
+# pi_heif.libs folder on its RPATH on Linux. The package's licence notices come along with its metadata.
 binaries = [(str(tesseract), "ocr")]
 if os.name == "nt":
     binaries += [(str(path), "ocr") for path in tesseract.parent.glob("*.dll")]

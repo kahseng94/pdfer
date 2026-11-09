@@ -1,6 +1,6 @@
 # pdfer
 
-Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, view Excel and CSV files, convert Excel workbooks to CSV and back, write and preview Markdown, export text or PDF pages as images, compress images, or crop a passport photo, on your own computer.
+Merge, split, organize, compare, search, OCR, edit, compress and protect PDFs, convert Word, Excel, PowerPoint, PNG and JPG files to PDF, view Excel and CSV files, convert Excel workbooks to CSV and back, write and preview Markdown, export text or PDF pages as images, compress, resize, crop, rotate, convert and adjust photos, see and remove what they record, or crop a passport photo, on your own computer.
 Nothing is uploaded anywhere: the backend listens on `127.0.0.1` only.
 
 ## Desktop app
@@ -27,7 +27,7 @@ pnpm start      # builds the UI, serves it at http://127.0.0.1:8000 and opens yo
 ```
 
 Files can be dropped anywhere on the page, and images can be pasted straight
-into the Images to PDF or Photo tab, or onto a page in the Edit tab. Nothing is
+into the Images to PDF tab, any of the Photos tabs, or onto a page in the Edit tab. Nothing is
 downloaded until you press Download on the result, which can also be opened
 straight in another tool that takes it (merge, then compress, say), so only
 the file you end up with lands in your downloads. A result goes away once you
@@ -766,6 +766,60 @@ links that could run code are removed, pictures appear only as their
 description, and links to other files are not followed. Web links open in a
 new browser tab; the desktop app does not open them. Files may be up to 5 MiB.
 
+### Photo tools
+
+The **Photos** tabs take JPG, PNG, WebP, GIF, BMP, TIFF, AVIF and HEIC
+pictures (HEIC and HEIF are what iPhones take), one or many at a time, and
+work on them without sending them anywhere. Each tab shows what every photo
+will become before anything is made, and offers the result for download or to
+open in another tool. Pictures keep their format unless you convert them:
+JPEGs are re-encoded at quality 90 with their camera data and colour profile,
+PNGs stay lossless, and GIF, BMP, TIFF, AVIF and HEIC pictures come back as
+PNG when they have transparency, else JPEG, so an iPhone photo dropped on
+**Convert images** leaves as a JPEG. Animated pictures contribute their first
+frame. A camera's orientation tag is applied first, so every photo starts the
+right way up, and the longest side of a result is at most 10,000 pixels. TIFF
+and HEIC pictures can be processed but not shown, so they have no preview and
+**Crop photo** asks for them to be converted first.
+
+- **Resize photos** scales a batch by its longest side (with common sizes a
+  click away), a width, a height, a width and height, or a percentage. With
+  both sides given, **Fit inside** keeps the proportions within the box,
+  **Fill and crop** keeps them and trims the overhang from the middle, and
+  **Stretch** matches the box exactly. Photos smaller than the size asked for
+  stay as they are unless **Enlarge** is on. Each row shows the size it will
+  come out at.
+- **Crop photo** draws a frame over one photo: drag it to move it, drag its
+  sides and corners to resize it, or type its position and size in pixels.
+  Choose a free shape, the photo's own, a square, 4:3, 3:2, 16:9, 4:5, 9:16
+  or a custom ratio. Rotate and flip buttons turn the photo first, and the
+  frame follows the picture round. Arrow keys nudge the frame, with Shift for
+  bigger steps and Alt to resize.
+- **Rotate & flip** turns a batch in quarter turns and mirrors it left to
+  right or top to bottom; the previews show how each photo will come out.
+  Turning a mirrored photo clockwise on screen turns it clockwise in the
+  result too.
+- **Convert images** saves a batch as JPEG, PNG or WebP. JPEG and WebP take a
+  quality from 1 to 100 (90 by default), and JPEG takes the colour that shows
+  through transparent areas. **Remove camera and location data** drops the
+  metadata; otherwise it comes along. A photo already in the chosen format is
+  named `_converted` so it doesn't replace the original.
+- **Adjust photo** changes brightness, contrast, saturation and sharpness
+  with sliders, or makes a photo black and white, and shows the result as you
+  move them, using the same arithmetic as the backend. **Hold to compare**
+  shows the original; double-click a slider to reset it.
+- **Photo details** reads what one photo records: format, size, resolution,
+  colour mode and frames; camera, lens, software and when it was taken;
+  shutter, aperture, ISO and focal length; coordinates and altitude; artist,
+  copyright and description; and which metadata the file carries (EXIF, XMP,
+  IPTC, colour profile). **Copy without location** removes the GPS section
+  and any XMP that mentions a location, keeping the camera data. **Copy
+  without any metadata** keeps only the colour profile and, so the photo
+  still shows the right way up, its orientation. For JPEG, PNG and WebP the
+  picture data is copied byte for byte, never recompressed, and a JPEG loses
+  anything stored after its end, such as embedded extra pictures. The card
+  for the copy says what it carries now.
+
 ### Images to PDF layouts
 
 Use **PNG to PDF** for PNGs, **JPG to PDF** for `.jpg`/`.jpeg` files, or
@@ -883,6 +937,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/metadata.py  targeted XMP/DocumentInfo edits and explicit document-metadata clearing
   src/pdfer/redactions.py image-only PDF rebuilding from masked pixels
   src/pdfer/spreadsheets.py Excel ↔ CSV with openpyxl, and sheets as cells for the viewer
+  src/pdfer/photos.py    one photo pipeline (turn, flip, crop, resize, adjust, encode), lossless metadata removal, and what a photo records
   src/pdfer/number_formats.py Excel number and date formats, for showing cells as Excel does
   src/pdfer/ocr.py       local OCR process dispatch, rotation and invisible text-layer assembly
   src/pdfer/paddle_ocr.py optional PP-OCRv6 runtime discovery
@@ -892,8 +947,8 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), MarkdownTool, ExcelCsvTool, CsvExcelTool, PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
-  src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), MarkdownTool, ExcelCsvTool, CsvExcelTool, PhotoResizeTool, PhotoCropTool (+ CropBox), PhotoRotateTool, PhotoConvertTool, PhotoAdjustTool, PhotoInfoTool (sharing PhotoItems), PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry, the photo edit spec with its resize plan and orientation algebra, crop-box geometry, and Pillow's enhancement maths for previews
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
   src/lib/markdown.ts    safe Markdown rendering with micromark, toolbar edits, task ticking and drafts
   src/components/OcrTool.tsx OCR languages, ranges, progress and preview
@@ -956,6 +1011,8 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/spreadsheets/xlsx` | `files` (1–50 CSV/TSV files, in sheet order), optional `delimiter` (`auto`, `comma`, `semicolon`, `tab`), `detect_types` (default true), `header` (default true) | `<name>.xlsx` for one file or `combined.xlsx`; `X-Spreadsheet-Summary` JSON gives each sheet's `name`, `source`, `rows`, `columns`, `delimiter` and `encoding`, and the control characters `removed` |
 | `POST /api/photo` | `file` (JPEG or PNG), `crop`, `width`, `height`, `dpi`, `max_kb` | `<name>_passport.jpg`, a JPEG of `width` × `height` pixels |
 | `POST /api/photo-sheet` | `file`, `crop`, `photo_width`, `photo_height`, `paper` | `<name>_passport_sheet.pdf`, with an `X-Copies` header |
+| `POST /api/photos/edit` | `files` (1 or more pictures), `edit` (JSON) | one edited picture, or a zip of them all, with `X-Results` (JSON: `name`, `before`, `after`, `width`, `height` per picture) |
+| `POST /api/photos/info` | `file` | JSON: format, size, colour mode, resolution, frames, orientation, camera, exposure, `gps`, author and which metadata the file carries |
 
 `password` is the source PDF's opening password. Merge's `passwords` is a
 JSON list aligned with `files`, with empty strings for unprotected inputs.
@@ -1101,5 +1158,27 @@ the file fits, for services with an upload limit. `/api/photo-sheet` prints it
 `photo_width` × `photo_height` mm as many times as fit on `paper` (`4x6`,
 `a4` or `letter`, turned landscape when that fits more), with 4 mm margins,
 2 mm gaps and cut lines between the copies, as a one-page PDF at 300 dpi.
+
+`/api/photos/edit` applies one `edit` to every picture, in this order after
+the EXIF orientation: `rotate` (0, 90, 180 or 270, clockwise), `flip`
+(`none`, `horizontal`, `vertical`), `crop` (as for `/api/photo`, in pixels of
+the turned and flipped picture; an upright crop is cut exactly, a turned one
+resampled), `resize`, `adjust`, then encoding. `resize` is an object with
+`width` and/or `height` (1–10,000), or `percent` (1–400), or `longest`
+(1–10,000), plus `fit` for a width and height (`contain`, `cover` or
+`stretch`; default `contain`) and `enlarge` (default false: a picture is
+never made bigger). `adjust` has `brightness`, `contrast`, `saturation` and
+`sharpness` factors from 0 to 4 (1 changes nothing, as in Pillow's
+ImageEnhance) and `grayscale`. `format` is `keep` (default), `jpeg`, `png` or
+`webp`; with `keep`, a picture that isn't a JPEG, PNG or WebP (GIF, BMP,
+TIFF, AVIF, HEIC) comes back as PNG when it has transparency, else JPEG.
+`quality` 1–100 (default 90) applies to JPEG and WebP; `background`
+(`#rrggbb`, default white) shows through transparency in a JPEG. `metadata`
+is `keep` (default), `no-location` (the GPS section and any XMP that
+mentions a location go) or `none` (only the colour profile and orientation
+stay). `suffix` (default `edited`; up to 24 lowercase letters, digits and
+hyphens, or empty) names the result `<stem>_<suffix>.<ext>`. An edit that
+changes no pixels and keeps a JPEG, PNG or WebP returns the file as it is, or
+with its metadata rewritten in place, so the picture is never recompressed.
 
 Errors come back as HTTP 400 with `{"detail": "..."}`.

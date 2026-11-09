@@ -13,7 +13,8 @@ const GROUPS = [
   group('Convert to PDF', 'word', 'excel', 'powerpoint', 'png', 'jpg', 'images'),
   group('Spreadsheets', 'sheet-view', 'excel-csv', 'csv-excel'),
   group('Text', 'markdown'),
-  group('Export & finish', 'compress', 'pdf-images', 'passwords', 'workflows', 'photo'),
+  group('Photos', 'photo-resize', 'photo-crop', 'photo-rotate', 'photo-convert', 'photo-adjust', 'photo-info', 'photo'),
+  group('Export & finish', 'compress', 'pdf-images', 'passwords', 'workflows'),
 ]
 const navigationTools = GROUPS.flatMap((section) => section.tools)
 
@@ -46,6 +47,12 @@ const TOOL_PATHS: Record<ToolId, string> = {
   'excel-csv': 'M3 4h11v16H3zM3 9h11M3 14h11M8 9v11m9-8h4m-2-2 2 2-2 2',
   'csv-excel': 'M10 4h11v16H10zM10 9h11M10 14h11M15 9v11M3 12h4m-2-2 2 2-2 2',
   markdown: 'M3 6h18v12H3zM6 15V9l2.5 3L11 9v6m6-6v6m-2.5-2.5L17 15l2.5-2.5',
+  'photo-resize': 'M3 3h18v18H3zM14 10l5-5m0 0h-4m4 0v4M10 14l-5 5m0 0h4m-4 0v-4',
+  'photo-crop': 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
+  'photo-rotate': 'M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8M21 3v5h-5M12 8v8m-3-3 3 3 3-3',
+  'photo-convert': 'M3 4h10v10H3zM11 10h10v10H11zM7 20H4v-3M17 4h3v3',
+  'photo-adjust': 'M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4',
+  'photo-info': 'M3 3h18v18H3zM12 11v5M12 8h.01',
   photo: 'M4 4h16v16H4zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-5 13v-2a5 5 0 0 1 10 0v2',
 }
 

@@ -6,7 +6,7 @@ import { TOOLS } from './lib/tools'
 
 // Exercise app navigation without starting the individual tools' I/O.
 beforeAll(() => {
-  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'OfficeTool', 'ExcelCsvTool', 'CsvExcelTool', 'SheetViewTool', 'MarkdownTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'FormBuilderTool', 'RedactTool', 'ProjectsPanel']) {
+  for (const name of ['CompressTool', 'EditTool', 'ImagesTool', 'OfficeTool', 'ExcelCsvTool', 'CsvExcelTool', 'SheetViewTool', 'MarkdownTool', 'MergeTool', 'OrganizeTool', 'PdfImagesTool', 'PasswordTool', 'PdfPasswordDialog', 'PhotoTool', 'PhotoResizeTool', 'PhotoCropTool', 'PhotoRotateTool', 'PhotoConvertTool', 'PhotoAdjustTool', 'PhotoInfoTool', 'SplitTool', 'StampTool', 'SignatureTool', 'TextTool', 'CompareTool', 'OcrTool', 'WorkflowTool', 'BookmarksTool', 'MetadataTool', 'FormsTool', 'FormBuilderTool', 'RedactTool', 'ProjectsPanel']) {
     vi.doMock(`./components/${name}`, () => ({ [name]: ({ active }: { active?: boolean }) => <span data-active={active}>{name}</span> }))
   }
 })
@@ -62,11 +62,11 @@ it('supports keyboard tabs and the compact picker without losing the selected to
     expect(tab('split').getAttribute('aria-selected')).toBe('true')
     expect(tab('merge').tabIndex).toBe(-1)
     await press('End')
-    expect(document.activeElement).toBe(tab('photo'))
+    expect(document.activeElement).toBe(tab('workflows'))
     await press('ArrowDown')
     expect(document.activeElement).toBe(tab('merge'))
     await press('ArrowUp')
-    expect(document.activeElement).toBe(tab('photo'))
+    expect(document.activeElement).toBe(tab('workflows'))
     await press('Home')
     expect(document.activeElement).toBe(tab('merge'))
 
@@ -74,6 +74,8 @@ it('supports keyboard tabs and the compact picker without losing the selected to
     expect(picker.value).toBe('merge')
     const converters = picker.querySelector('optgroup[label="Convert to PDF"]')!
     expect([...converters.querySelectorAll('option')].map((option) => option.value)).toEqual(['word', 'excel', 'powerpoint', 'png', 'jpg', 'images'])
+    const photos = picker.querySelector('optgroup[label="Photos"]')!
+    expect([...photos.querySelectorAll('option')].map((option) => option.value)).toEqual(['photo-resize', 'photo-crop', 'photo-rotate', 'photo-convert', 'photo-adjust', 'photo-info', 'photo'])
     const tabs = [...container.querySelectorAll('[role="tab"]')]
     expect([...picker.options].map((option) => `tab-${option.value}`)).toEqual(tabs.map((item) => item.id))
     // The converter group precedes export tools on screen. Arrow keys must follow it across the boundary.

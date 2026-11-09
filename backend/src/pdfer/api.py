@@ -21,7 +21,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from pdfer import bookmarks, core, fonts, forms, metadata, ocr, office, redactions, signatures, spreadsheets
+from pdfer import bookmarks, core, fonts, forms, metadata, ocr, office, photos, redactions, signatures, spreadsheets
 
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -593,6 +593,36 @@ def compress_images(
         [{"name": quote(r.name), "before": r.before, "after": r.after} for r in results]
     )
     return res
+
+
+@app.post("/api/photos/edit")
+def photos_edit(files: Annotated[list[UploadFile], File()], edit: Annotated[str, Form()]) -> Response:
+    """Resize, crop, turn, convert, adjust or strip the metadata of one or more photos.
+
+    `edit` is JSON; see `photos.parse_photo_edit`. Every photo gets the same
+    edit and is named `<stem>_<suffix>.<ext>` after the edit's `suffix`
+    (`edited` unless given; `<stem>.<ext>` when empty). One photo comes back
+    as an image, several as a zip. `X-Results` is a JSON list of `{"name",
+    "before", "after", "width", "height"}` per photo in the order sent, with
+    names percent-encoded and sizes in bytes.
+    """
+    parsed = photos.parse_photo_edit(edit)
+    results = [photos.edit_photo(_upload_name(f, f"Image {i + 1}"), f.file.read(), parsed) for i, f in enumerate(files)]
+    if len(results) == 1:
+        only = results[0]
+        res = _download(only.data, only.name, only.media_type)
+    else:
+        res = _download(_zip([(r.name, r.data) for r in results]), f"photos_{parsed.suffix or 'edited'}.zip", "application/zip")
+    res.headers["X-Results"] = json.dumps(
+        [{"name": quote(r.name), "before": r.before, "after": r.after, "width": r.width, "height": r.height} for r in results]
+    )
+    return res
+
+
+@app.post("/api/photos/info")
+def photos_info(file: UploadFile) -> Response:
+    """What one photo is and records: format, size, camera, exposure, location and metadata present."""
+    return JSONResponse(photos.read_photo_info(_upload_name(file, "photo"), file.file.read()), headers={"Cache-Control": "no-store"})
 
 
 # Serve the built frontend when it exists, so `pdfer` alone runs the whole app.

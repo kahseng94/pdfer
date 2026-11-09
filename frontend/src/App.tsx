@@ -18,6 +18,12 @@ import { PdfImagesTool } from './components/PdfImagesTool'
 import { PasswordTool } from './components/PasswordTool'
 import { PdfPasswordDialog } from './components/PdfPasswordDialog'
 import { PhotoTool } from './components/PhotoTool'
+import { PhotoResizeTool } from './components/PhotoResizeTool'
+import { PhotoCropTool } from './components/PhotoCropTool'
+import { PhotoRotateTool } from './components/PhotoRotateTool'
+import { PhotoConvertTool } from './components/PhotoConvertTool'
+import { PhotoAdjustTool } from './components/PhotoAdjustTool'
+import { PhotoInfoTool } from './components/PhotoInfoTool'
 import { SplitTool } from './components/SplitTool'
 import { StampTool } from './components/StampTool'
 import { SignatureTool } from './components/SignatureTool'
@@ -143,6 +149,24 @@ export default function App() {
             </section>
             <section id="panel-markdown" role="tabpanel" aria-labelledby="tab-markdown" hidden={tool !== 'markdown'}>
               <MarkdownTool active={tool === 'markdown'} />
+            </section>
+            <section id="panel-photo-resize" role="tabpanel" aria-labelledby="tab-photo-resize" hidden={tool !== 'photo-resize'}>
+              <PhotoResizeTool active={tool === 'photo-resize'} />
+            </section>
+            <section id="panel-photo-crop" role="tabpanel" aria-labelledby="tab-photo-crop" hidden={tool !== 'photo-crop'}>
+              <PhotoCropTool active={tool === 'photo-crop'} />
+            </section>
+            <section id="panel-photo-rotate" role="tabpanel" aria-labelledby="tab-photo-rotate" hidden={tool !== 'photo-rotate'}>
+              <PhotoRotateTool active={tool === 'photo-rotate'} />
+            </section>
+            <section id="panel-photo-convert" role="tabpanel" aria-labelledby="tab-photo-convert" hidden={tool !== 'photo-convert'}>
+              <PhotoConvertTool active={tool === 'photo-convert'} />
+            </section>
+            <section id="panel-photo-adjust" role="tabpanel" aria-labelledby="tab-photo-adjust" hidden={tool !== 'photo-adjust'}>
+              <PhotoAdjustTool active={tool === 'photo-adjust'} />
+            </section>
+            <section id="panel-photo-info" role="tabpanel" aria-labelledby="tab-photo-info" hidden={tool !== 'photo-info'}>
+              <PhotoInfoTool active={tool === 'photo-info'} />
             </section>
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />
