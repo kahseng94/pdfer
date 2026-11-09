@@ -90,14 +90,17 @@ async function run(dataDir, phase) {
     const ready = await evaluate(`(async () => {
       const deadline = Date.now() + 20000;
       while (!document.querySelector('#panel-merge input[type=file]') && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
-      return { bridge: !!window.pdferDesktop, node: typeof window.process, text: document.body.innerText,
+      return { bridge: !!window.pdferDesktop, node: typeof window.process,
+        // Desktop-only controls render once the page sees the bridge; the update panel itself shows only when there is news.
+        updateButton: !!document.querySelector('button[aria-label="Check for updates"]'),
         health: await (await fetch('/api/desktop/health')).json(), ocr: await (await fetch('/api/ocr/status')).json(),
         fonts: (await fetch('/api/fonts')).status, signatures: (await fetch('/api/signatures')).status };
     })()`)
     assert.equal(ready.bridge, true); assert.equal(ready.node, 'undefined'); assert.equal(ready.health.ready, true)
     assert.equal(ready.fonts, 200); assert.equal(ready.signatures, 200)
     assert.equal(ready.ocr.available, true, JSON.stringify(ready.ocr))
-    assert.ok(ready.ocr.languages.includes('eng')); assert.equal(ready.ocr.can_rotate, true); assert.match(ready.text, /Desktop/)
+    assert.ok(ready.ocr.languages.includes('eng')); assert.equal(ready.ocr.can_rotate, true)
+    assert.equal(ready.updateButton, true, 'The desktop update check button did not render')
     if (process.env.PDFER_SMOKE_EXPECT_UNPUBLISHED === '1') {
       const state = await evaluate(`(async () => {
         await window.pdferDesktop.checkForUpdates();
