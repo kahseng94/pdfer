@@ -188,11 +188,13 @@ export function organizePdf(file: File, pages: readonly PageOp[], layout?: PageL
   return post('/api/organize', body, 'organized.pdf', pdfPassword(file), signal)
 }
 
-/** `images` are the files the image edits refer to by index. */
-export function editPdf(file: File, edits: EditPayload[], images: File[], signal?: AbortSignal): Promise<File> {
+/** `images` are the files the image edits refer to by index; `sources` the other PDFs that copied regions refer to by index. */
+export function editPdf(file: File, edits: EditPayload[], images: File[], signal?: AbortSignal, sources: File[] = []): Promise<File> {
   const body = pdfBody(file)
   body.append('edits', JSON.stringify(edits))
   for (const img of images) body.append('images', img)
+  for (const source of sources) body.append('sources', source)
+  if (sources.length) body.append('source_passwords', JSON.stringify(sources.map((source) => pdfPassword(source))))
   return post('/api/edit', body, 'edited.pdf', pdfPassword(file), signal)
 }
 

@@ -406,3 +406,148 @@ def test_rejects_regions_touching_interactive_objects(rotation, at_destination):
         source = core._save(pdf)
     with pytest.raises(core.PdfToolError, match="touches a link, annotation or form field"):
         core.edit(source, [edit])
+
+
+# --- Copying from another PDF -------------------------------------------------
+
+def destination(rotation=0, unit=1, password=""):
+    """A separate PDF to paste into: a marked first page and a cropped, rotated second page."""
+    with pikepdf.new() as pdf:
+        first = pdf.add_blank_page(page_size=(300, 400))
+        first.Contents = pdf.make_stream(b"0.9 0.8 0.1 rg 0 340 60 60 re f")
+        target = pdf.add_blank_page(page_size=(240, 360))
+        target.CropBox = [10, 20, 210, 320]
+        target.Rotate = rotation
+        target.UserUnit = unit
+        pdf.docinfo.Title = "Destination fixture"
+        return core._save(pdf, password)
+
+
+@pytest.mark.parametrize("source_rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("destination_rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize(("source_unit", "destination_unit"), [(1, 1), (2, 1), (1, 2)])
+@pytest.mark.parametrize("region_rotation", [0, 90, 180, 270])
+def test_copy_from_another_pdf_matches_its_visible_crop(source_rotation, destination_rotation, source_unit, destination_unit, region_rotation):
+    other = document(source_rotation, source_unit)
+    target = destination(destination_rotation, destination_unit)
+    with pikepdf.open(BytesIO(other)) as pdf:
+        _, sw, sh = core._display_frame(pdf.pages[0])
+    with pikepdf.open(BytesIO(target)) as pdf:
+        _, dw, dh = core._display_frame(pdf.pages[1])
+    turned = region_rotation in (90, 270)
+    cut = core.RegionEdit(source_document=0, source_page=1, page=2, rotation=region_rotation, source=(40 * source_unit, 60 * source_unit, 80 * source_unit, 60 * source_unit),
+                          x=20, y=30, width=(60 if turned else 80) * source_unit, height=(80 if turned else 60) * source_unit)
+    output = core.edit(target, [cut], sources=[("other.pdf", other, "")])
+    before_source = render(other, scale=2 * source_unit)
+    before_destination = render(target, number=1, scale=2 * destination_unit)
+    source_box = pixel_box(cut.source, before_source, sw * source_unit, sh * source_unit)
+    dest_box = pixel_box((cut.x, cut.y, cut.width, cut.height), before_destination, dw * destination_unit, dh * destination_unit)
+    expected = before_destination.copy()
+    cutout = before_source.crop(source_box)
+    if region_rotation:
+        cutout = cutout.transpose({90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_90}[region_rotation])
+    expected.paste(cutout, dest_box[:2])
+    difference = ImageChops.difference(render(output, number=1, scale=2 * destination_unit), expected)
+    assert max(ImageStat.Stat(difference).mean) < (.15 if region_rotation else .05)
+    ImageDraw.Draw(difference).rectangle((dest_box[0], dest_box[1], dest_box[2] - 1, dest_box[3] - 1), fill=(0, 0, 0))
+    assert difference.getbbox() is None
+    # The first page and the other PDF are exactly as they were.
+    assert ImageChops.difference(render(target), render(output)).getbbox() is None
+    with pikepdf.open(BytesIO(target)) as original, pikepdf.open(BytesIO(output)) as pdf:
+        assert pdf.check_pdf_syntax() == []
+        assert len(pdf.pages) == 2
+        assert pdf.docinfo.Title == "Destination fixture"
+        assert pdf.pages[0].Contents.read_bytes() == original.pages[0].Contents.read_bytes()
+        assert pdf.pages[1].rotation == destination_rotation
+        form = next(iter(pdf.pages[1].Resources.XObject.values()))
+        assert form.Subtype == pikepdf.Name.Form  # the other page's objects, not a picture of them
+        assert b"Move this text" in form.read_bytes()
+        assert form.Resources.Font.F1.BaseFont == pikepdf.Name.Helvetica
+        assert list(form.Resources.XObject.keys()) == ["/Triangle"]
+
+
+def test_copies_from_another_pdf_share_one_frozen_page_and_keep_its_text_and_password():
+    other = document(password="secret")
+    target = destination(password="target")
+    first = core.RegionEdit(source_document=0, source_page=1, page=1, source=(20, 55, 140, 90), x=20, y=50, width=140, height=90)
+    second = replace(first, page=2, x=10, y=10, width=70, height=45)
+    local = core.RegionEdit(source_page=1, page=2, copy=True, source=(0, 0, 60, 60), x=100, y=200, width=60, height=60)
+    output = core.edit(target, [first, second, local], password="target", sources=[("other.pdf", other, "secret")])
+    with pikepdf.open(BytesIO(output), password="target") as pdf:
+        assert pdf.is_encrypted
+        assert pdf.check_pdf_syntax() == []
+        forms = [list(page.Resources.XObject.values()) for page in pdf.pages]
+        assert len(forms[0]) == 1 and len(forms[1]) == 2
+        assert forms[0][0].objgen == next(form for form in forms[1] if b"Move this text" in form.read_bytes()).objgen
+    with pdfium.PdfDocument(output, password="target") as pdf:
+        for number in range(2):
+            page = pdf[number]
+            text = page.get_textpage()
+            try:
+                assert "Move this text" in text.get_text_range()
+            finally:
+                text.close()
+                page.close()
+    image = render(output, "target", number=1)
+    assert image.getpixel((260, 460)) == (230, 204, 26)  # the local copy, drawn from this PDF's own page
+
+
+def test_copies_from_another_pdf_never_vacate_and_keep_the_output_version_high_enough():
+    other = document()
+    with pikepdf.open(BytesIO(other)) as pdf:
+        pdf.save(buffer := BytesIO(), min_version="1.7")
+        other = buffer.getvalue()
+    target = destination()
+    not_a_copy = core.RegionEdit(source_document=0, source_page=1, page=1, copy=False, source=(20, 55, 140, 90), x=20, y=50, width=140, height=90)
+    output = core.edit(target, [not_a_copy], sources=[("other.pdf", other, "")])
+    assert render(output).getpixel((60, 60)) != (255, 255, 255)  # nothing is painted white; the other PDF had nothing to vacate
+    with pikepdf.open(BytesIO(output)) as pdf:
+        assert pdf.pdf_version >= "1.7"
+
+
+def test_copy_from_another_pdf_validation():
+    other = document()
+    target = destination()
+    valid = core.RegionEdit(source_document=0, source_page=1, page=1, source=(20, 55, 140, 90), x=20, y=50, width=140, height=90)
+    for edit, message in [
+        (replace(valid, source_document=1), "source PDF that wasn't provided"),
+        (replace(valid, source_page=3), "outside pages 1-2 of other.pdf"),
+        (replace(valid, deleted=True), "cannot be deleted"),
+        (replace(valid, source=(200, 55, 140, 90)), "page 1 of other.pdf"),
+    ]:
+        with pytest.raises(core.PdfToolError, match=message):
+            core.edit(target, [edit], sources=[("other.pdf", other, "")])
+    with pytest.raises(core.PdfToolError, match="password for other.pdf is incorrect"):
+        core.edit(target, [valid], sources=[("other.pdf", document(password="secret"), "wrong")])
+    with pytest.raises(core.PdfToolError, match="other.pdf is password-protected"):
+        core.edit(target, [valid], sources=[("other.pdf", document(password="secret"), "")])
+    with pytest.raises(core.PdfToolError, match="source PDF that wasn't uploaded"):
+        core.parse_edits(json.dumps([payload() | {"sourceDocument": 0}]), 2, 0, 0)
+    for patch in [{"sourceDocument": True}, {"sourceDocument": "0"}, {"sourceDocument": -1}, {"sourceDocument": 1}, {"sourceDocument": 0, "deleted": True}, {"sourceDocument": 0, "sourcePage": 0}]:
+        with pytest.raises(core.PdfToolError):
+            core.parse_edits(json.dumps([payload() | patch]), 2, 0, 1)
+    # Pages of the other PDF are checked when it is opened, not against the edited PDF's page count.
+    [parsed] = core.parse_edits(json.dumps([payload() | {"sourceDocument": 0, "sourcePage": 9}]), 2, 0, 1)
+    assert parsed == core.RegionEdit(page=1, source_document=0, source_page=9, copy=True, source=(30, 60, 70, 60), x=160, y=200, width=100, height=80)
+    [parsed] = core.parse_edits(json.dumps([payload() | {"sourceDocument": 0}]), 2, 0, 1)
+    assert parsed.source_page == 1 and parsed.copy
+
+
+def test_copy_from_another_pdf_api_takes_sources_and_their_passwords():
+    edits = [payload() | {"sourceDocument": 0, "sourcePage": 1, "page": 2, "x": 20, "y": 30}]
+    with TestClient(app) as client:
+        files = [("file", ("target.pdf", destination(), "application/pdf")), ("sources", ("other.pdf", document(password="secret"), "application/pdf"))]
+        response = client.post("/api/edit", files=files, data={"edits": json.dumps(edits), "source_passwords": json.dumps(["secret"])})
+        assert response.status_code == 200, response.text
+        assert 'filename="target_edited.pdf"' in response.headers["content-disposition"]
+        with pikepdf.open(BytesIO(response.content)) as pdf:
+            assert b"Move this text" in next(iter(pdf.pages[1].Resources.XObject.values())).read_bytes()
+        response = client.post("/api/edit", files=files, data={"edits": json.dumps(edits)})
+        assert response.status_code == 400
+        assert response.json() == {"detail": "other.pdf is password-protected."}
+        response = client.post("/api/edit", files=files, data={"edits": json.dumps(edits), "source_passwords": json.dumps(["a", "b"])})
+        assert response.status_code == 400
+        assert "one password per source PDF" in response.json()["detail"]
+        response = client.post("/api/edit", files=files[:1], data={"edits": json.dumps(edits)})
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Edit 1 refers to a source PDF that wasn't uploaded."}

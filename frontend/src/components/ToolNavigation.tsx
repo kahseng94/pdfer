@@ -9,7 +9,7 @@ function group(label: string, ...ids: ToolId[]) {
 const GROUPS = [
   group('Pages & document', 'merge', 'split', 'organize', 'bookmarks', 'metadata'),
   group('Read & compare', 'text', 'compare', 'ocr'),
-  group('Edit & annotate', 'edit', 'forms', 'form-builder', 'redact', 'signatures', 'stamps'),
+  group('Edit & annotate', 'edit', 'copy-pdf', 'forms', 'form-builder', 'redact', 'signatures', 'stamps'),
   group('Convert to PDF', 'word', 'excel', 'powerpoint', 'png', 'jpg', 'images'),
   group('Spreadsheets', 'sheet-view', 'excel-csv', 'csv-excel'),
   group('Text', 'markdown'),
@@ -28,6 +28,7 @@ const TOOL_PATHS: Record<ToolId, string> = {
   compare: 'M3 4h7v16H3zM14 4h7v16h-7zM6 8h1m-1 4h1m10-4h1m-1 4h1',
   ocr: 'M3 8V3h5m8 0h5v5m0 8v5h-5m-8 0H3v-5M8 8h8m-4 0v9m-3 0h6',
   edit: 'm16 3 5 5L8 21H3v-5L16 3Zm-3 3 5 5',
+  'copy-pdf': 'M2 5h7v14H2zM15 5h7v14h-7zM5 12h13m-3-3 3 3-3 3',
   forms: 'M4 3h16v18H4zM8 7h8m-8 5h2m4 0h2m-8 5h8',
   'form-builder': 'M4 3h16v18H4zM7 7h10v3H7zM7 14h3v3H7zm7 1.5h3M15.5 13v5',
   redact: 'M4 3h16v18H4zM8 7h8M7 11h10v4H7zM8 18h5',

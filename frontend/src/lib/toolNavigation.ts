@@ -10,6 +10,7 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
   compare: { title: 'Compare PDFs', description: 'Review two PDFs side by side and find changes in text and appearance.' },
   ocr: { title: 'Recognize text', description: 'Make scanned pages searchable with on-device text recognition.' },
   edit: { title: 'Edit a PDF', description: 'Add text, images, highlights, and drawings, or move page content.' },
+  'copy-pdf': { title: 'Copy between PDFs', description: 'Open two PDFs side by side and copy parts of one onto the pages of the other.' },
   forms: { title: 'Fill forms', description: 'Complete existing form fields and save a filled copy of your PDF.' },
   'form-builder': { title: 'Create a form', description: 'Add text boxes, checkboxes, dropdowns, and radio buttons to make a PDF fillable.' },
   redact: { title: 'Redact a PDF', description: 'Permanently remove sensitive text and areas from your document.' },

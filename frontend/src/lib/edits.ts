@@ -48,6 +48,8 @@ export type RegionElement = Base & Box & {
   type: 'region'
   sourcePage: number
   source: Box
+  /** The PDF the cutout comes from when it is not the one being edited. Such regions are always copies. */
+  sourceFile?: File
   /** Clockwise quarter turns. Width and height describe the rotated visible box. */
   rotation?: RegionRotation
   /** An independent placement that never covers the original source. */
@@ -55,6 +57,9 @@ export type RegionElement = Base & Box & {
   /** Keep the source covered without placing the cutout at its destination. */
   deleted?: boolean
 }
+
+/** What a copied region refers to: a rectangle of a page, in this PDF or another one. */
+export type RegionClip = { sourceFile?: File; sourcePage: number; source: Box }
 export type ShapeElement = Base & {
   type: 'rect' | 'ellipse'
   x: number
@@ -266,6 +271,21 @@ export function copyRegionToPage(region: RegionElement, id: string, page: number
   return { ...copy, x: offset(copy.x, size.width - copy.width), y: offset(copy.y, size.height - copy.height) }
 }
 
+/** A copy of the clip in the middle of a page, at its original size unless the page is smaller. */
+export function pastedRegion(clip: RegionClip, id: string, page: number, size: { width: number; height: number }): RegionElement {
+  const fitted = constrainBox({ x: 0, y: 0, width: clip.source.width, height: clip.source.height }, size, true)
+  return {
+    id, type: 'region', page, copy: true, sourcePage: clip.sourcePage, source: clip.source,
+    ...(clip.sourceFile ? { sourceFile: clip.sourceFile } : {}),
+    ...fitted, x: (size.width - fitted.width) / 2, y: (size.height - fitted.height) / 2,
+  }
+}
+
+/** What a region would copy if it were pasted again. */
+export function clipOf(region: RegionElement): RegionClip {
+  return { sourcePage: region.sourcePage, source: region.source, ...(region.sourceFile ? { sourceFile: region.sourceFile } : {}) }
+}
+
 export function boxesOverlap(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
@@ -290,7 +310,7 @@ type Common = { page: number }
 export type EditPayload =
   | (Common & { type: 'text'; x: number; y: number; text: string; size: number; color: string; family: FontFamily; bold: boolean; italic: boolean })
   | (Common & { type: 'image'; x: number; y: number; width: number; height: number; image: number })
-  | (Common & Box & { type: 'region'; sourcePage: number; source: Box; rotation?: RegionRotation; copy?: boolean; deleted?: boolean })
+  | (Common & Box & { type: 'region'; sourcePage: number; source: Box; sourceDocument?: number; rotation?: RegionRotation; copy?: boolean; deleted?: boolean })
   | (Common & { type: 'rect' | 'ellipse'; x: number; y: number; width: number; height: number; stroke: string; strokeWidth: number; fill: string | null })
   | (Common & { type: 'highlight'; x: number; y: number; width: number; height: number; color: string })
   | (Common & { type: 'line'; x1: number; y1: number; x2: number; y2: number; stroke: string; strokeWidth: number })
@@ -299,10 +319,12 @@ export type EditPayload =
 const round = (n: number) => Math.round(n * 100) / 100
 export const roundedBox = (box: Box): Box => ({ x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) })
 
-/** The edits as JSON for the backend, and the image files they refer to by index. */
-export function toPayload(elements: readonly Element[]): { edits: EditPayload[]; images: File[] } {
+/** The edits as JSON for the backend, with the image files and the other PDFs they refer to by index. */
+export function toPayload(elements: readonly Element[]): { edits: EditPayload[]; images: File[]; sources: File[] } {
   const images: File[] = []
   const index = new Map<File, number>()
+  const sources: File[] = []
+  const sourceIndex = new Map<File, number>()
   const edits = elements.map((el): EditPayload => {
     switch (el.type) {
       case 'text':
@@ -326,8 +348,17 @@ export function toPayload(elements: readonly Element[]): { edits: EditPayload[];
         }
         return { type: 'image', page: el.page, x: round(el.x), y: round(el.y), width: round(el.width), height: round(el.height), image: i }
       }
-      case 'region':
-        return { type: 'region', page: el.page, sourcePage: el.sourcePage, ...roundedBox(el), source: roundedBox(el.source), ...(el.rotation ? { rotation: el.rotation } : {}), ...(el.copy ? { copy: true } : {}), ...(el.deleted ? { deleted: true } : {}) }
+      case 'region': {
+        let document: number | undefined
+        if (el.sourceFile) {
+          document = sourceIndex.get(el.sourceFile)
+          if (document === undefined) {
+            document = sources.push(el.sourceFile) - 1
+            sourceIndex.set(el.sourceFile, document)
+          }
+        }
+        return { type: 'region', page: el.page, sourcePage: el.sourcePage, ...roundedBox(el), source: roundedBox(el.source), ...(document === undefined ? {} : { sourceDocument: document, copy: true }), ...(el.rotation ? { rotation: el.rotation } : {}), ...(el.copy ? { copy: true } : {}), ...(el.deleted ? { deleted: true } : {}) }
+      }
       case 'rect':
       case 'ellipse':
         return { type: el.type, page: el.page, x: round(el.x), y: round(el.y), width: round(el.width), height: round(el.height), stroke: el.stroke, strokeWidth: el.strokeWidth, fill: el.fill }
@@ -339,5 +370,5 @@ export function toPayload(elements: readonly Element[]): { edits: EditPayload[];
         return { type: 'draw', page: el.page, points: el.points.map(([x, y]): Point => [round(x), round(y)]), stroke: el.stroke, strokeWidth: el.strokeWidth }
     }
   })
-  return { edits, images }
+  return { edits, images, sources }
 }

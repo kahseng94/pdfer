@@ -162,6 +162,19 @@ button:not(:disabled), summary { cursor: pointer; }
 .ui-button:disabled { cursor: not-allowed; background: var(--ui-raised); color: var(--ui-muted); }
 .tool-actions { position: sticky; bottom: 16px; z-index: 10; padding: 12px; border: 1px solid var(--ui-border); border-radius: 12px; background: var(--ui-surface); }
 
+/* Copy between PDFs: the PDF to copy from on the left, the one to paste into on the right.
+   The window scrolls the PDF being pasted into; the other PDF keeps its place and scrolls on its own, and
+   reaching its end never scrolls the window. */
+.copy-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+.copy-source-pane {
+  position: sticky;
+  top: var(--title-bar-height, 0px);
+  max-height: calc(100dvh - var(--title-bar-height, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
 @media (max-width: 1023px) {
   .app-shell { display: block; }
   .tool-sidebar { display: none; }
@@ -178,6 +191,9 @@ button:not(:disabled), summary { cursor: pointer; }
   .workspace-heading p { font-size: 14px; line-height: 22px; }
   .saved-projects { margin-bottom: 24px; }
   .workspace-footer { display: block; margin-top: 24px; text-align: center; }
+  .copy-split { grid-template-columns: minmax(0, 1fr); }
+  /* Stacked above the PDF being pasted into, the other PDF takes part of the screen and still scrolls on its own. */
+  .copy-source-pane { position: static; max-height: 60dvh; }
 }
 
 @media (max-width: 479px) {

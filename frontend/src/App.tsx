@@ -66,7 +66,7 @@ export default function App() {
           <div className="title-bar" aria-hidden="true" />
           <a className="skip-link" href="#workspace">Skip to workspace</a>
           <ToolNavigation selected={tool} onSelect={select} />
-          <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' ? 'workspace-wide' : ''}`}>
+          <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' || tool === 'copy-pdf' ? 'workspace-wide' : ''}`}>
             <DesktopUpdates />
             <ProjectsPanel />
             <header className="workspace-heading">
@@ -101,6 +101,10 @@ export default function App() {
             </section>
             <section id="panel-edit" role="tabpanel" aria-labelledby="tab-edit" hidden={tool !== 'edit'}>
               <EditTool active={tool === 'edit'} />
+            </section>
+            {/* The same editor with a second PDF beside it to copy from; Edit itself works on one PDF. */}
+            <section id="panel-copy-pdf" role="tabpanel" aria-labelledby="tab-copy-pdf" hidden={tool !== 'copy-pdf'}>
+              <EditTool mode="copy" active={tool === 'copy-pdf'} />
             </section>
             <section id="panel-forms" role="tabpanel" aria-labelledby="tab-forms" hidden={tool !== 'forms'}>
               <FormsTool active={tool === 'forms'} />

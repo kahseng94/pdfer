@@ -12,6 +12,7 @@ export const TOOLS = [
   { id: 'compare', label: 'Compare PDFs', takes: 'pdf' },
   { id: 'ocr', label: 'OCR', takes: 'pdf' },
   { id: 'edit', label: 'Edit', takes: 'pdf' },
+  { id: 'copy-pdf', label: 'Copy between PDFs', takes: 'pdf' },
   { id: 'forms', label: 'Fill forms', takes: 'pdf' },
   { id: 'form-builder', label: 'Create form', takes: 'pdf' },
   { id: 'redact', label: 'Redact', takes: 'pdf' },

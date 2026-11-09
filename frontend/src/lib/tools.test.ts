@@ -6,9 +6,9 @@ const ids = (f: File, from: Parameters<typeof targetsFor>[1]) => targetsFor(f, f
 
 describe('targetsFor', () => {
   it('offers a PDF to every PDF tool but the one that made it', () => {
-    expect(ids(file('merged.pdf', 'application/pdf'), 'merge')).toEqual(['split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
-    expect(ids(file('a_edited.pdf'), 'edit')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
-    expect(ids(file('images.pdf', 'application/pdf'), 'images')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('merged.pdf', 'application/pdf'), 'merge')).toEqual(['split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'copy-pdf', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('a_edited.pdf'), 'edit')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'copy-pdf', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
+    expect(ids(file('images.pdf', 'application/pdf'), 'images')).toEqual(['merge', 'split', 'organize', 'bookmarks', 'metadata', 'text', 'compare', 'ocr', 'edit', 'copy-pdf', 'forms', 'form-builder', 'redact', 'signatures', 'stamps', 'compress', 'pdf-images', 'passwords', 'workflows'])
   })
 
   const photoTools = ['photo-resize', 'photo-crop', 'photo-rotate', 'photo-convert', 'photo-adjust', 'photo-info']

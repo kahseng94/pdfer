@@ -1,9 +1,11 @@
-import type { Element, ImageElement, Style } from './edits'
+import type { Element, ImageElement, RegionElement, Style } from './edits'
 import type { OrganizeItem, OrganizeSettings } from './organize'
 import type { SignaturePlacement } from './signatures'
 
 export type ProjectStates = {
   edit: { elements: Element[]; style: Style; zoom: number }
+  /** The Copy between PDFs tab: the same editor, whose copies refer to other PDFs stored with the project. */
+  'copy-pdf': { elements: Element[]; style: Style; zoom: number }
   organize: { items: OrganizeItem[]; selected: string[]; settings: OrganizeSettings; referenceId: string }
   signatures: { elements: SignaturePlacement[]; page: number; assetId: string | null }
 }
@@ -17,13 +19,16 @@ export type ProjectSummary = {
 }
 type StoredFile = { blob: Blob; name: string; lastModified: number }
 type StoredImage = Omit<ImageElement, 'file' | 'url'> & { image: number }
-type StoredElement = Exclude<Element, ImageElement> | StoredImage
+/** A region copied from another PDF names it by index into the stored sources. */
+type StoredRegion = Omit<RegionElement, 'sourceFile'> & { sourceDocument?: number }
+type StoredElement = Exclude<Element, ImageElement | RegionElement> | StoredImage | StoredRegion
 type StoredSignature = Omit<SignaturePlacement, 'file' | 'url'> & { image: number }
 type StoredState =
-  | { tool: 'edit'; state: Omit<ProjectStates['edit'], 'elements'> & { elements: StoredElement[] } }
+  | { tool: 'edit' | 'copy-pdf'; state: Omit<ProjectStates['edit'], 'elements'> & { elements: StoredElement[] } }
   | { tool: 'organize'; state: ProjectStates['organize'] }
   | { tool: 'signatures'; state: Omit<ProjectStates['signatures'], 'elements'> & { elements: StoredSignature[] } }
-export type ProjectContent = StoredState & { version: 1; file: StoredFile; images: StoredFile[] }
+/** `sources` are the other PDFs that copied regions come from; only Copy between PDFs projects have any. */
+export type ProjectContent = StoredState & { version: 1; file: StoredFile; images: StoredFile[]; sources?: StoredFile[] }
 export type SavedProject = { summary: ProjectSummary; content: ProjectContent }
 
 const DATABASE = 'pdfer-projects'
@@ -37,7 +42,7 @@ function restoreFile(file: StoredFile): File {
   return new File([file.blob], file.name, { type: file.blob.type, lastModified: file.lastModified })
 }
 
-/** Original PDF bytes and independent image copies; never passwords or object URLs. */
+/** Original PDF bytes, independent image copies and the other PDFs regions copy from; never passwords or object URLs. */
 export function serializeProject(draft: ProjectDraft): ProjectContent {
   const images: StoredFile[] = []
   const indices = new Map<File, number>()
@@ -47,9 +52,18 @@ export function serializeProject(draft: ProjectDraft): ProjectContent {
     if (index === undefined) { index = images.push(storeFile(file)) - 1; indices.set(file, index) }
     return { ...rest, image: index }
   }
-  const base = { version: 1 as const, file: storeFile(draft.file), images }
+  const sources: StoredFile[] = []
+  const sourceIndices = new Map<File, number>()
+  function region(element: RegionElement): StoredRegion {
+    const { sourceFile, ...rest } = element
+    if (!sourceFile) return rest
+    let index = sourceIndices.get(sourceFile)
+    if (index === undefined) { index = sources.push(storeFile(sourceFile)) - 1; sourceIndices.set(sourceFile, index) }
+    return { ...rest, sourceDocument: index }
+  }
+  const base = { version: 1 as const, file: storeFile(draft.file), images, sources }
   switch (draft.tool) {
-    case 'edit': return { ...base, tool: draft.tool, state: { ...draft.state, elements: draft.state.elements.map((el) => el.type === 'image' ? image(el) : el) } }
+    case 'edit': case 'copy-pdf': return { ...base, tool: draft.tool, state: { ...draft.state, elements: draft.state.elements.map((el) => el.type === 'image' ? image(el) : el.type === 'region' ? region(el) : el) } }
     case 'signatures': return { ...base, tool: draft.tool, state: { ...draft.state, elements: draft.state.elements.map(image) } }
     case 'organize': return { ...base, tool: draft.tool, state: draft.state }
   }
@@ -74,7 +88,7 @@ function style(value: unknown): boolean {
     && ['color', 'stroke', 'highlight'].every((key) => typeof value[key] === 'string')
     && typeof value.bold === 'boolean' && typeof value.italic === 'boolean' && (value.fill === null || typeof value.fill === 'string')
 }
-function storedElement(value: unknown, images: number, signature: boolean): boolean {
+function storedElement(value: unknown, images: number, sources: number, signature: boolean): boolean {
   if (!object(value) || typeof value.id !== 'string' || !Number.isInteger(value.page) || (value.page as number) < 1) return false
   if (signature && (value.type !== 'image' || typeof value.signatureId !== 'string' || typeof value.label !== 'string' || !numbers(value, ['aspect']) || (value.aspect as number) <= 0)) return false
   const stroke = typeof value.stroke === 'string' && numbers(value, ['strokeWidth'])
@@ -87,6 +101,7 @@ function storedElement(value: unknown, images: number, signature: boolean): bool
       && (value.copy === undefined || typeof value.copy === 'boolean') && !(value.copy && value.deleted)
       && (value.deleted === undefined || typeof value.deleted === 'boolean')
       && (value.sourcePage === undefined || (Number.isInteger(value.sourcePage) && (value.sourcePage as number) >= 1))
+      && (value.sourceDocument === undefined || (Number.isInteger(value.sourceDocument) && (value.sourceDocument as number) >= 0 && (value.sourceDocument as number) < sources && value.copy === true))
       && (value.width as number) >= 2 && (value.height as number) >= 2 && object(value.source)
       && numbers(value.source, ['x', 'y', 'width', 'height']) && (value.source.x as number) >= 0 && (value.source.y as number) >= 0
       && (value.source.width as number) >= 2 && (value.source.height as number) >= 2
@@ -99,11 +114,15 @@ function storedElement(value: unknown, images: number, signature: boolean): bool
 }
 
 export function validateProject(value: unknown): asserts value is ProjectContent {
-  if (!object(value) || value.version !== 1 || !storedFile(value.file) || !Array.isArray(value.images) || !value.images.every(storedFile) || !object(value.state)) throw new Error(FORMAT_ERROR)
+  if (!object(value) || value.version !== 1 || !storedFile(value.file) || !Array.isArray(value.images) || !value.images.every(storedFile)
+    || !(value.sources === undefined || (Array.isArray(value.sources) && value.sources.every(storedFile))) || !object(value.state)) throw new Error(FORMAT_ERROR)
   const state = value.state
-  if (value.tool === 'edit' || value.tool === 'signatures') {
-    if (!Array.isArray(state.elements) || !state.elements.every((el) => storedElement(el, (value.images as unknown[]).length, value.tool === 'signatures')) || new Set(state.elements.map((el) => el.id)).size !== state.elements.length) throw new Error(FORMAT_ERROR)
-    if (value.tool === 'edit' ? !style(state.style) || !numbers(state, ['zoom']) || (state.zoom as number) <= 0
+  const editor = value.tool === 'edit' || value.tool === 'copy-pdf'
+  if (editor || value.tool === 'signatures') {
+    // Edit works on one PDF, so only Copy between PDFs projects may refer to others.
+    const sources = value.tool === 'copy-pdf' && Array.isArray(value.sources) ? value.sources.length : 0
+    if (!Array.isArray(state.elements) || !state.elements.every((el) => storedElement(el, (value.images as unknown[]).length, sources, value.tool === 'signatures')) || new Set(state.elements.map((el) => el.id)).size !== state.elements.length) throw new Error(FORMAT_ERROR)
+    if (editor ? !style(state.style) || !numbers(state, ['zoom']) || (state.zoom as number) <= 0
       : !Number.isInteger(state.page) || (state.page as number) < 1 || !(state.assetId === null || typeof state.assetId === 'string')) throw new Error(FORMAT_ERROR)
   } else if (value.tool === 'organize') {
     if (!Array.isArray(state.items) || !state.items.every((item) => object(item) && typeof item.id === 'string' && Number.isInteger(item.page) && (item.page as number) > 0 && [0, 90, 180, 270].includes(item.rotation as number))
@@ -121,6 +140,7 @@ export function restoreProject(content: ProjectContent): { draft: ProjectDraft; 
   validateProject(content)
   const urls: string[] = []
   const images = content.images.map(restoreFile)
+  const sources = (content.sources ?? []).map(restoreFile)
   const pictures = new Map<number, { file: File; url: string }>()
   const dispose = () => { for (const url of urls.splice(0)) URL.revokeObjectURL(url) }
   function image<T extends StoredImage>(element: T): Omit<T, 'image'> & { file: File; url: string } {
@@ -134,20 +154,30 @@ export function restoreProject(content: ProjectContent): { draft: ProjectDraft; 
     }
     return { ...rest, ...picture }
   }
+  function region(element: StoredRegion): RegionElement {
+    const { sourceDocument, ...rest } = element
+    // Older projects stored same-page regions with only the destination page.
+    return { ...rest, sourcePage: rest.sourcePage ?? rest.page, ...(sourceDocument === undefined ? {} : { sourceFile: sources[sourceDocument] }) }
+  }
   try {
     const file = restoreFile(content.file)
     switch (content.tool) {
-      case 'edit': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map((el) =>
-        el.type === 'image' ? image(el) : el.type === 'region' ? { ...el, sourcePage: el.sourcePage ?? el.page } : el) } }, dispose }
+      case 'edit': case 'copy-pdf': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map((el) =>
+        el.type === 'image' ? image(el) : el.type === 'region' ? region(el) : el) } }, dispose }
       case 'signatures': return { draft: { tool: content.tool, file, state: { ...content.state, elements: content.state.elements.map(image) } }, dispose }
       case 'organize': return { draft: { tool: content.tool, file, state: content.state }, dispose }
     }
   } catch (error) { dispose(); throw error }
 }
 
+/** Every page reference into the PDF itself; pages of other PDFs are checked with `checkSourcePages` once those are open. */
 export function checkProjectPages(state: ProjectStates[ProjectTool], total: number) {
   const entries = 'items' in state ? state.items : state.elements
-  if (entries.some((entry) => entry.page > total || ('sourcePage' in entry && entry.sourcePage > total)) || ('page' in state && state.page > total)) throw new Error(FORMAT_ERROR)
+  if (entries.some((entry) => entry.page > total || ('sourcePage' in entry && !('sourceFile' in entry && entry.sourceFile) && entry.sourcePage > total)) || ('page' in state && state.page > total)) throw new Error(FORMAT_ERROR)
+}
+
+export function checkSourcePages(elements: readonly Element[], file: File, total: number) {
+  if (elements.some((el) => el.type === 'region' && el.sourceFile === file && el.sourcePage > total)) throw new Error(FORMAT_ERROR)
 }
 
 export function projectError(error: unknown): string {
@@ -212,7 +242,7 @@ export function saveProject(draft: ProjectDraft, name: string, previous?: Projec
       const now = Date.now()
       const summary: ProjectSummary = {
         id: current?.id ?? crypto.randomUUID(), name: trimmed, tool: draft.tool, filename: draft.file.name,
-        size: draft.file.size + content.images.reduce((sum, image) => sum + image.blob.size, 0),
+        size: draft.file.size + [...content.images, ...content.sources ?? []].reduce((sum, stored) => sum + stored.blob.size, 0),
         createdAt: current?.createdAt ?? now, updatedAt: now, revision: (current?.revision ?? 0) + 1,
       }
       projects.put(summary)

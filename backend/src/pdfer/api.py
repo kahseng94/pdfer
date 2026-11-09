@@ -284,19 +284,38 @@ def edit(
     file: UploadFile,
     edits: Annotated[str, Form()],
     images: Annotated[list[UploadFile] | None, File()] = None,
+    sources: Annotated[list[UploadFile] | None, File()] = None,
+    source_passwords: Annotated[str, Form()] = "",
     password: Annotated[str, Form()] = "",
 ) -> Response:
     """Draw overlays, or move/copy/delete regions of the original PDF.
 
     `edits` is a JSON list; see `core.parse_edits` for the fields. Positions
     are in points on the page as displayed, from its top-left corner. Image
-    edits refer to `images` by index.
+    edits refer to `images` by index. Regions copied from other PDFs refer to
+    `sources` by index; `source_passwords` is a JSON list with one password
+    per source, empty for files that need none.
     """
     data = file.file.read()
     name = file.filename or "document.pdf"
     pictures = [(f.filename or f"Image {i + 1}", f.file.read()) for i, f in enumerate(images or [])]
-    parsed = core.parse_edits(edits, core.page_count(data, name, password), len(pictures))
-    return _download(core.edit(data, parsed, pictures, name, password), f"{_stem(file.filename)}_edited.pdf", "application/pdf")
+    passwords = _password_list(source_passwords, len(sources or []))
+    documents = [(f.filename or f"PDF {i + 1}", f.file.read(), passwords[i]) for i, f in enumerate(sources or [])]
+    parsed = core.parse_edits(edits, core.page_count(data, name, password), len(pictures), len(documents))
+    return _download(core.edit(data, parsed, pictures, name, password, sources=documents), f"{_stem(file.filename)}_edited.pdf", "application/pdf")
+
+
+def _password_list(raw: str, count: int) -> list[str]:
+    """One password per file from a JSON list, empty where none was given."""
+    if not raw:
+        return [""] * count
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, list) or len(parsed) > count or not all(isinstance(p, str) for p in parsed):
+        raise core.PdfToolError("Source passwords must be a JSON list with one password per source PDF.")
+    return [*parsed, *[""] * (count - len(parsed))]
 
 
 @app.post("/api/stamp")

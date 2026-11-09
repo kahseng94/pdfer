@@ -74,6 +74,8 @@ type Props = {
   style: Style
   editor: Editor
   lockImageAspect?: boolean
+  /** The other PDFs that copied regions come from, once they are open. */
+  sourceDocs?: ReadonlyMap<File, PDFDocumentProxy>
 }
 
 type Drag =
@@ -99,7 +101,7 @@ const CURSORS: Record<Tool, string> = {
 }
 
 /** One page with its elements drawn over it, where they can be added, moved and resized. */
-export function EditPage({ doc, pageNumber, size, zoom, elements, sourceRegions, selectedId, editingId, tool, style, editor, lockImageAspect = false }: Props) {
+export function EditPage({ doc, pageNumber, size, zoom, elements, sourceRegions, selectedId, editingId, tool, style, editor, lockImageAspect = false, sourceDocs }: Props) {
   const svg = useRef<SVGSVGElement>(null)
   const drag = useRef<Drag | null>(null)
   const scrollFrame = useRef<number | null>(null)
@@ -448,7 +450,7 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, sourceRegions,
         ) : (
           <>
             {regions.map((el) => <rect key={el.id} data-region-source={el.id} {...el.source} fill="white" pointerEvents="none" />)}
-            {elements.map((el) => (el.id === editing?.id ? null : render(el, zoom, interactive, doc)))}
+            {elements.map((el) => (el.id === editing?.id ? null : render(el, zoom, interactive, doc, sourceDocs)))}
             {selected && selected.id !== editing?.id && <Selection el={selected} zoom={zoom} cornersOnly={selected.type === 'region' || (lockImageAspect && selected.type === 'image')} />}
           </>
         )}
@@ -468,20 +470,24 @@ export function EditPage({ doc, pageNumber, size, zoom, elements, sourceRegions,
   )
 }
 
-function render(el: Element, zoom: number, interactive: boolean, doc: PDFDocumentProxy): ReactNode {
+function render(el: Element, zoom: number, interactive: boolean, doc: PDFDocumentProxy, sourceDocs?: ReadonlyMap<File, PDFDocumentProxy>): ReactNode {
   const className = interactive ? 'cursor-move' : undefined
   // Thin strokes are hard to hit, so an invisible wider twin takes the clicks.
   const hitWidth = (strokeWidth: number) => Math.max(strokeWidth, 10 / zoom)
 
   switch (el.type) {
-    case 'region':
+    case 'region': {
       if (el.deleted) return null
+      const source = el.sourceFile ? sourceDocs?.get(el.sourceFile) : doc
       return (
         <g key={el.id} data-id={el.id} className={className}>
-          <RegionPreview region={el} doc={doc} zoom={zoom} />
+          {source ? <RegionPreview region={el} doc={source} zoom={zoom} /> : <foreignObject x={el.x} y={el.y} width={el.width} height={el.height} pointerEvents="none">
+            <div className="flex h-full w-full items-center justify-center bg-white text-center text-xs text-zinc-500" role="status">Opening {el.sourceFile?.name}…</div>
+          </foreignObject>}
           <rect x={el.x} y={el.y} width={el.width} height={el.height} fill="transparent" />
         </g>
       )
+    }
     case 'text': {
       const box = textBox(el)
       return (

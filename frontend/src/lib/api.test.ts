@@ -70,6 +70,22 @@ describe('password-aware PDF requests', () => {
     expect(pdfPassword(result)).toBe('second secret')
   })
 
+  it('sends the other PDFs that regions copy from, with their remembered passwords', async () => {
+    const { file, fetch } = setup()
+    const other = new File(['other'], 'other.pdf', { type: 'application/pdf' })
+    const another = new File(['another'], 'another.pdf', { type: 'application/pdf' })
+    rememberPdfPassword(another, 'other secret')
+    const edits = [{ type: 'region' as const, page: 1, sourcePage: 2, sourceDocument: 1, copy: true, x: 0, y: 0, width: 10, height: 10, source: { x: 5, y: 5, width: 10, height: 10 } }]
+    await editPdf(file, edits, [], undefined, [other, another])
+    const [, request] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    const body = request.body as FormData
+    expect(body.getAll('sources').map((entry) => (entry as File).name)).toEqual(['other.pdf', 'another.pdf'])
+    expect(JSON.parse(String(body.get('source_passwords')))).toEqual(['', 'other secret'])
+    expect(JSON.parse(String(body.get('edits')))).toEqual(edits)
+    await editPdf(file, [], [])
+    expect(((fetch.mock.calls[1] as unknown as [string, RequestInit])[1].body as FormData).has('source_passwords')).toBe(false)
+  })
+
   it('keeps the password with split, organize, edit and compress results for handoff', async () => {
     const { file, fetch } = setup()
     const results = [

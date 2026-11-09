@@ -3,7 +3,7 @@ import { formatSize } from '../lib/pdf'
 import { ProjectContext } from '../lib/useProject'
 import { ErrorMessage } from './ui'
 
-const LABELS = { edit: 'Edit', organize: 'Organize', signatures: 'Signatures' }
+const LABELS = { edit: 'Edit', 'copy-pdf': 'Copy between PDFs', organize: 'Organize', signatures: 'Signatures' }
 
 export function ProjectsPanel() {
   const manager = useContext(ProjectContext)
@@ -12,7 +12,7 @@ export function ProjectsPanel() {
   return <details className="saved-projects">
     <summary><svg className="projects-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7V4h6l3 3h9v13H3V7Z" /></svg><span>Saved projects{manager.projects.length > 0 && ` (${manager.projects.length})`}{manager.error && ' · Needs attention'}</span><span className="projects-location">On this device</span><svg className="projects-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg></summary>
     <div className="space-y-3 border-t border-zinc-200 p-4 dark:border-zinc-800">
-      <p className="text-sm text-zinc-500">Work in Edit, Organize, and Signatures is saved automatically as you make changes. Projects include your PDF and placed images, and stay in this browser on this device. Clearing site data removes them. Passwords are never saved.</p>
+      <p className="text-sm text-zinc-500">Work in Edit, Copy between PDFs, Organize, and Signatures is saved automatically as you make changes. Projects include your PDF, placed images and the PDFs you copy from, and stay in this browser on this device. Clearing site data removes them. Passwords are never saved.</p>
       <button type="button" disabled={manager.loading || !!manager.working} onClick={() => void manager.refresh()} className="text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400">Refresh projects</button>
       {manager.loading && <p role="status" className="text-sm text-zinc-500">Loading projects…</p>}
       {manager.error && <ErrorMessage>{manager.error}</ErrorMessage>}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   boxBetween,
   boxesOverlap,
+  clipOf,
   bounds,
   clampPoint,
   constrainBox,
@@ -9,6 +10,7 @@ import {
   imagePlacement,
   moved,
   normalizeText,
+  pastedRegion,
   resized,
   regionOnPage,
   rotateRegion,
@@ -71,7 +73,7 @@ describe('regions', () => {
     expect(toPayload([copy]).edits[0]).toMatchObject({ copy: true, page: 2, sourcePage: 1, source: { x: 10.12, y: 30.46, width: 80, height: 40 } })
   })
   it('serializes deleted regions as masks while keeping their original source and former destination', () => {
-    expect(toPayload([{ ...region, page: 2, deleted: true }])).toEqual({ images: [], edits: [{
+    expect(toPayload([{ ...region, page: 2, deleted: true }])).toEqual({ images: [], sources: [], edits: [{
       type: 'region', page: 2, sourcePage: 1, deleted: true, x: 100.12, y: 200.46, width: 40, height: 20,
       source: { x: 10.12, y: 30.46, width: 80, height: 40 },
     }] })
@@ -80,7 +82,7 @@ describe('regions', () => {
     const next = moved(region, 10, 20)
     expect(next.source).toEqual(region.source)
     expect(bounds(next)).toEqual({ x: 110.123, y: 220.456, width: 40, height: 20 })
-    expect(toPayload([next])).toEqual({ images: [], edits: [{ type: 'region', page: 1, sourcePage: 1, x: 110.12, y: 220.46, width: 40, height: 20, source: { x: 10.12, y: 30.46, width: 80, height: 40 } }] })
+    expect(toPayload([next])).toEqual({ images: [], sources: [], edits: [{ type: 'region', page: 1, sourcePage: 1, x: 110.12, y: 220.46, width: 40, height: 20, source: { x: 10.12, y: 30.46, width: 80, height: 40 } }] })
   })
 
   it('changes destination pages while preserving the source and fitting proportionally', () => {
@@ -193,5 +195,36 @@ describe('toPayload', () => {
       { type: 'line', page: 1, x1: 10, y1: 30, x2: 50, y2: 20, stroke: '#000000', strokeWidth: 4 },
       { type: 'draw', page: 1, points: [[5, 5], [8, 1], [2, 9]], stroke: '#000000', strokeWidth: 2 },
     ])
+  })
+})
+
+describe('regions copied from another PDF', () => {
+  const other = new File(['other'], 'other.pdf', { type: 'application/pdf' })
+  const another = new File(['another'], 'another.pdf', { type: 'application/pdf' })
+  const clip = { sourceFile: other, sourcePage: 3, source: { x: 10, y: 20, width: 60, height: 80 } }
+
+  it('pastes a copy in the middle of the page at its original size, shrinking only to fit', () => {
+    const pasted = pastedRegion(clip, 'pasted', 2, { width: 200, height: 300 })
+    expect(pasted).toEqual({ id: 'pasted', type: 'region', page: 2, copy: true, sourceFile: other, sourcePage: 3, source: clip.source, x: 70, y: 110, width: 60, height: 80 })
+    expect(pastedRegion(clip, 'small', 1, { width: 30, height: 100 })).toMatchObject({ x: 0, y: 30, width: 30, height: 40 })
+    const local = pastedRegion({ sourcePage: 1, source: clip.source }, 'local', 1, { width: 200, height: 300 })
+    expect(local.sourceFile).toBeUndefined()
+    expect(local).toMatchObject({ copy: true, sourcePage: 1, x: 70, y: 110 })
+    expect(clipOf(pasted)).toEqual(clip)
+    expect(clipOf(region)).toEqual({ sourcePage: 1, source: region.source })
+  })
+
+  it('hands the other PDFs to the backend once each, numbered in order of first use', () => {
+    const first = pastedRegion(clip, 'first', 1, { width: 200, height: 300 })
+    const second = pastedRegion({ ...clip, sourceFile: another, sourcePage: 1 }, 'second', 1, { width: 200, height: 300 })
+    const third = copyRegionToPage(first, 'third', 2, { width: 200, height: 300 })
+    expect(third.sourceFile).toBe(other)
+    const payload = toPayload([region, first, second, third])
+    expect(payload.sources).toEqual([other, another])
+    expect(payload.images).toEqual([])
+    expect(payload.edits[0]).not.toHaveProperty('sourceDocument')
+    expect(payload.edits[1]).toMatchObject({ type: 'region', page: 1, sourcePage: 3, sourceDocument: 0, copy: true, source: clip.source, x: 70, y: 110, width: 60, height: 80 })
+    expect(payload.edits[2]).toMatchObject({ sourcePage: 1, sourceDocument: 1, copy: true })
+    expect(payload.edits[3]).toMatchObject({ page: 2, sourceDocument: 0, copy: true })
   })
 })

@@ -37,13 +37,14 @@ directly: `uv --directory backend run pdfer --no-browser --port 9000`.
 
 ### Save and resume projects
 
-In **Edit**, **Organize**, or **Signatures**, your first edit, page arrangement
-change or signature placement automatically creates a local project named after
+In **Edit**, **Copy between PDFs**, **Organize**, or **Signatures**, your first edit,
+paste, page arrangement change or signature placement automatically creates a local project named after
 the PDF. Further changes update that same project. Open **Saved projects** above
 the tool tabs to resume after refreshing the page or restarting pdfer. The source
 PDF is included, so you do not need to find or upload it again.
 
-Projects keep text, drawings, highlights, placed images and moved regions in Edit; page order,
+Projects keep text, drawings, highlights, placed images and moved regions in Edit;
+pasted copies and the PDFs they come from in Copy between PDFs; page order,
 duplicates, removals, rotations, crop/resize settings and selections in Organize;
 and signature images, sizes, positions and page assignments in Signatures.
 Placed images are independent copies, so deleting a signature from the library
@@ -115,7 +116,9 @@ page bounds and remains selected, ready to drag to a new position. The view stay
 where you are. Copies can be moved, resized or copied again. They always
 refer to the original PDF content, so deleting or restoring another region does
 not change them. Creating a copy is one undo step, and copies are saved in projects
-and exported without rasterizing their text or vector graphics.
+and exported without rasterizing their text or vector graphics. **⌘C** (**Ctrl+C**)
+with a region selected, then **⌘V** (**Ctrl+V**), also duplicates it, onto the page
+in view. Edit works on one PDF; to copy content from another PDF, use **Copy between PDFs**.
 
 Use **Delete region**, Delete, or Backspace to remove the selected cutout from
 the visible layout. Its original source stays covered with white. If it was moved
@@ -147,6 +150,35 @@ It changes the visible layout: original objects remain in the file and can still
 be searched or extracted. It is **not redaction**; use **Redact** for sensitive
 content. A source or destination touching a link, annotation or form field is
 rejected on export, since those interactive objects cannot move with a region.
+
+### Copy between PDFs
+
+**Copy between PDFs** shows two PDFs side by side: the one to copy from on the
+left and the one to paste into on the right. Choose them in either order. Drag
+a rectangle around the content to copy on any page on the left, then put it on
+the right: press **Paste** for the page chosen in **Paste onto page**, drag the
+selection straight onto a page (every page lights up the moment you press on
+the selection, and the one under the pointer stands out more), or press **⌘C**
+(**Ctrl+C**) and then **⌘V** (**Ctrl+V**) to paste onto the page in view. With
+nothing selected on the left, **⌘C** copies the selected pasted copy instead.
+
+Each side scrolls on its own, and the left side keeps its place while you
+scroll the PDF you paste into. A pasted copy can be moved (including onto
+another page), resized, rotated, copied to other pages or deleted, and its
+controls say which PDF and page it comes from. This tab is only for copying;
+open the result in **Edit** to add text, drawings or other changes.
+
+The PDF you copy from is only read and never changed. Its text and drawings
+come across as PDF content rather than a picture. As with regions moved in
+Edit, the whole source page is embedded and clipped to the rectangle, so
+content outside it is hidden rather than removed; redact the saved PDF if the
+rest of that page must not travel with it. A copy cannot overlap a link,
+comment or form field on either PDF; **Create form** can delete form fields
+that are in the way. Password-protected PDFs are opened with the password you
+entered for them. **Change PDF** or a drop onto the left side swaps the PDF to
+copy from, and copies already pasted keep their content. Choosing another PDF
+to paste into keeps the PDF on the left and its selection. Saved projects
+store the PDFs you copied from, so resuming one reopens them.
 
 ### Organize, crop and resize pages
 
@@ -954,7 +986,7 @@ backend/                 Python 3.14, FastAPI, pikepdf, Pillow, img2pdf, fontToo
   src/pdfer/api.py       HTTP endpoints; also serves frontend/dist if built
   tests/
 frontend/                Vite, React, TypeScript, Tailwind
-  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), MarkdownTool, ExcelCsvTool, CsvExcelTool, PhotoResizeTool, PhotoCropTool (+ CropBox), PhotoRotateTool, PhotoConvertTool, PhotoAdjustTool, PhotoInfoTool (sharing PhotoItems), PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
+  src/components/        MergeTool, SplitTool, OrganizeTool (+ PdfCropEditor), BookmarksTool, MetadataTool, FormsTool, RedactTool (+ RedactionPage), PdfToolPreview, TextTool (+ TextPage), CompareTool (+ ComparePreview), WorkflowTool (+ WorkflowSteps, WorkflowResults), ProjectsPanel, ProjectControls, EditTool (+ EditPage, CopySourcePane; also the Copy between PDFs tab), SignatureTool (+ SignatureCreator), StampTool (+ DocumentPreview), CompressTool, PdfImagesTool, PasswordTool (+ PdfPasswordDialog), ImagesTool, SheetViewTool (+ SheetGrid), MarkdownTool, ExcelCsvTool, CsvExcelTool, PhotoResizeTool, PhotoCropTool (+ CropBox), PhotoRotateTool, PhotoConvertTool, PhotoAdjustTool, PhotoInfoTool (sharing PhotoItems), PhotoTool (+ PhotoCropper), Dropzone, PageThumbnail, ResultCard
   src/lib/               API client, workflow presets and sequential batch runner, the tool list and passing results between tools, pdf.js previews, text extraction/search and image export, ZIP packaging, range helpers, edit elements and geometry, fonts, passport photo sizes and crop geometry, the photo edit spec with its resize plan and orientation algebra, crop-box geometry, and Pillow's enhancement maths for previews
   src/lib/projects.ts    versioned local project snapshots and atomic IndexedDB storage
   src/lib/markdown.ts    safe Markdown rendering with micromark, toolbar edits, task ticking and drafts
@@ -997,7 +1029,7 @@ separate. Results are packaged locally with `fflate` after every file succeeds.
 | `POST /api/metadata/read` | `file`, optional `password` | XMP and DocumentInfo values, conflicts, read-only fields, store presence and editability warnings |
 | `POST /api/metadata` | `file`, optional `changes` (JSON object: omitted field = keep, string = edit, null = clear), `clear` (default false), `password` | `<name>_metadata.pdf`; `clear=true` removes both document metadata stores and cannot be combined with field edits |
 | `POST /api/redact` | `pages` (already-masked PNG images), `sizes` (JSON array of physical width/height in points), optional output `password` | a new image-only PDF; the browser names it `<name>_redacted.pdf` |
-| `POST /api/edit` | `file`, `edits`, `images` (0 or more), optional `password` | `<name>_edited.pdf` |
+| `POST /api/edit` | `file`, `edits`, `images` (0 or more), `sources` (0 or more PDFs regions copy from) with optional `source_passwords` (a JSON list, one per source), optional `password` | `<name>_edited.pdf` |
 | `GET /api/signatures` | | metadata for locally saved signature images |
 | `POST /api/signatures/prepare` | `file`, optional `remove_white` | prepared PNG with `X-Image-Width` and `X-Image-Height` |
 | `POST /api/signatures` | `file` (prepared PNG), `name` | saved signature metadata |
@@ -1112,6 +1144,14 @@ displays whatever the page's rotation or crop box. Colours are `#rrggbb`.
   Optional `rotation` is clockwise 0 (default), 90, 180 or 270 degrees relative
   to the original displayed crop. The destination `width` and `height` describe
   the visible box after rotation. The source rectangle and page never rotate.
+  Optional `sourceDocument` is an index into the uploaded `sources`: the region
+  then samples that other PDF's `sourcePage` instead of a page of `file`. Such
+  regions are always copies, since the other PDF is never changed; `deleted`
+  is rejected for them. Each source page is embedded once as a form XObject,
+  so its text and vector graphics stay sharp and searchable, and the output's
+  PDF version is raised to the source's when that is higher. The `sourcePage`
+  is checked against the other PDF once it is opened, and its rectangle must
+  fit that page and stay clear of its annotations, links and form fields.
 - `rect` and `ellipse`: `x`, `y`, `width`, `height`, plus `stroke` with
   `strokeWidth`, `fill`, or both.
 - `highlight`: `x`, `y`, `width`, `height`, `color`; blends like a marker pen,

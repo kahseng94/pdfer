@@ -11,7 +11,7 @@ import secrets
 import zlib
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Literal
 
@@ -830,7 +830,9 @@ class RegionEdit(_Edit):
     The source is covered with white, not securely removed. The destination
     uses a clipped form XObject, so text and vector graphics remain sharp.
     Deleted regions keep only the source mask, with no destination cutout.
-    Copies place a cutout without covering the source.
+    Copies place a cutout without covering the source. A region may also come
+    from another PDF: `source_document` indexes the sources handed to edit(),
+    and such regions are always copies, since the other file is never changed.
     """
 
     source: tuple[float, float, float, float]  # left, top, width, height
@@ -839,6 +841,7 @@ class RegionEdit(_Edit):
     width: float
     height: float
     source_page: int | None = None
+    source_document: int | None = None
     rotation: int = 0  # clockwise; width/height are the rotated visible box
     copy: bool = False
     deleted: bool = False
@@ -896,6 +899,7 @@ Edit = TextEdit | ImageEdit | RegionEdit | ShapeEdit | HighlightEdit | LineEdit 
 _MAX_COORD = 100_000
 _MAX_TEXT = 5_000
 _MAX_POINTS = 10_000
+_MAX_PAGES = 100_000
 _COLOR = re.compile(r"^#([0-9a-fA-F]{6})$")
 
 
@@ -989,13 +993,15 @@ def _region_rotation(value: object) -> int:
     return int(value)  # type: ignore[arg-type]
 
 
-def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
+def parse_edits(spec: str, total: int, images: int = 0, sources: int = 0) -> list[Edit]:
     """Parse a JSON list of edits.
 
     Every item has a "type" and a 1-based "page". The other fields match the
     dataclasses above, with camelCase keys: "strokeWidth", and colours as
     "#rrggbb". An image edit names its picture by "image", an index into the
-    `images` that will be handed to edit(); the count is checked here.
+    `images` that will be handed to edit(); the count is checked here. A region
+    may name another PDF by "sourceDocument", an index into the `sources` handed
+    to edit(); its "sourcePage" is checked against that PDF when it is opened.
     """
     try:
         items = json.loads(spec)
@@ -1036,11 +1042,18 @@ def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
             )
         elif kind == "region":
             source = _Fields(f._raw("source"), f"{f.label} source")
+            document = f.item.get("sourceDocument")
+            if document is not None and (isinstance(document, bool) or not isinstance(document, int) or not 0 <= document < sources):
+                raise PdfToolError(f"{f.label} refers to a source PDF that wasn't uploaded.")
+            if document is not None and f.flag("deleted"):
+                raise PdfToolError(f"{f.label} copies from another PDF, so it cannot be deleted; remove the edit instead.")
             edits.append(RegionEdit(
                 page=page,
-                source_page=f.page(total, "sourcePage") if "sourcePage" in f.item else page,
+                source_document=document,
+                # Another PDF's page count is only known once edit() opens it.
+                source_page=f.page(_MAX_PAGES if document is not None else total, "sourcePage") if "sourcePage" in f.item else page,
                 rotation=_region_rotation(f.item.get("rotation", 0)),
-                copy=f.flag("copy"),
+                copy=document is not None or f.flag("copy"),
                 deleted=f.flag("deleted"),
                 source=(source.num("x", 0), source.num("y", 0), source.num("width", 2), source.num("height", 2)),
                 x=f.num("x", 0), y=f.num("y", 0), width=f.num("width", 2), height=f.num("height", 2),
@@ -1098,21 +1111,27 @@ def parse_edits(spec: str, total: int, images: int = 0) -> list[Edit]:
     return edits
 
 
-def edit(data: bytes, edits: Sequence[Edit], images: Sequence[tuple[str, bytes]] = (), name: str = "file", password: str = "") -> bytes:
+def edit(data: bytes, edits: Sequence[Edit], images: Sequence[tuple[str, bytes]] = (), name: str = "file", password: str = "",
+         sources: Sequence[tuple[str, bytes, str]] = ()) -> bytes:
     """Draw edits and move regions. Each image is (display name, bytes).
 
     Regions always sample the original page, before any edits. All vacated
     areas are covered first, then edits are drawn in their listed order.
+    Each source is another PDF as (display name, bytes, password) that regions
+    may copy from; those PDFs are read, never changed.
     """
     if not edits:
         raise PdfToolError("Add at least one edit.")
     if sum(isinstance(e, RegionEdit) for e in edits) > 200:
         raise PdfToolError("Use at most 200 regions at a time.")
 
-    with _open(data, name, password) as pdf:
+    with ExitStack() as stack:
+        pdf = stack.enter_context(_open(data, name, password))
         total = len(pdf.pages)
         by_page: dict[int, list[Edit]] = {}
         by_source: dict[int, list[RegionEdit]] = {}
+        # Regions copied from other PDFs, by (source index, source page).
+        foreign: dict[tuple[int, int], list[RegionEdit]] = {}
         for e in edits:
             if not 1 <= e.page <= total:
                 raise PdfToolError(f"Page {e.page} is outside pages 1-{total}.")
@@ -1122,11 +1141,21 @@ def edit(data: bytes, edits: Sequence[Edit], images: Sequence[tuple[str, bytes]]
                 _region_rotation(e.rotation)
                 if e.copy and e.deleted:
                     raise PdfToolError("To delete a copied region, remove its edit instead of marking its source deleted.")
-                if isinstance(e.origin_page, bool) or not isinstance(e.origin_page, int) or not 1 <= e.origin_page <= total:
-                    raise PdfToolError(f"Source page {e.origin_page} is outside pages 1-{total}.")
-                by_source.setdefault(e.origin_page, []).append(e)
-                if e.deleted:
-                    continue  # Keep only the source mask; the destination is untouched.
+                if isinstance(e.origin_page, bool) or not isinstance(e.origin_page, int):
+                    raise PdfToolError(f"Source page {e.origin_page} is not a page number.")
+                if e.source_document is not None:
+                    if isinstance(e.source_document, bool) or not isinstance(e.source_document, int) or not 0 <= e.source_document < len(sources):
+                        raise PdfToolError("An edit refers to a source PDF that wasn't provided.")
+                    if e.deleted:
+                        raise PdfToolError("A region copied from another PDF cannot be deleted; remove its edit instead.")
+                    e = replace(e, copy=True)  # the other PDF is never changed, so there is nothing to vacate
+                    foreign.setdefault((e.source_document, e.origin_page), []).append(e)
+                else:
+                    if not 1 <= e.origin_page <= total:
+                        raise PdfToolError(f"Source page {e.origin_page} is outside pages 1-{total}.")
+                    by_source.setdefault(e.origin_page, []).append(e)
+                    if e.deleted:
+                        continue  # Keep only the source mask; the destination is untouched.
             by_page.setdefault(e.page, []).append(e)
 
         painter = _Painter(pdf, images)
@@ -1137,14 +1166,28 @@ def edit(data: bytes, edits: Sequence[Edit], images: Sequence[tuple[str, bytes]]
         # Capture every source before painting any page, including when two
         # pages exchange regions or a source page also has ordinary overlays.
         painter.region_sources = {
-            number: _region_original(pdf, pdf.pages[number - 1])
+            (None, number): _RegionSource.of(pdf, pdf.pages[number - 1])
             for number, regions in by_source.items() if any(not region.deleted for region in regions)
         }
+        min_version = "1.4" if images else "1.3"
+        opened: dict[int, pikepdf.Pdf] = {}
+        for (index, page_no), regions in foreign.items():
+            other = opened.get(index)
+            if other is None:
+                other_name, other_data, other_password = sources[index]
+                other = opened[index] = stack.enter_context(_open(other_data, other_name, other_password))
+                min_version = max(min_version, other.pdf_version)
+            other_name = sources[index][0]
+            if not 1 <= page_no <= len(other.pages):
+                raise PdfToolError(f"Source page {page_no} is outside pages 1-{len(other.pages)} of {other_name}.")
+            _region_boxes(other.pages[page_no - 1], regions, source=True, document=other_name)
+            # The other PDF's page becomes a form in this one; its own file stays as it is.
+            painter.region_sources[(index, page_no)] = _RegionSource.of(other, other.pages[page_no - 1], into=pdf)
         vacated = {number: [region for region in regions if not region.copy] for number, regions in by_source.items()}
         for page_no in dict.fromkeys([*by_page, *(number for number, regions in vacated.items() if regions)]):
             painter.paint(pdf.pages[page_no - 1], by_page.get(page_no, []), vacated=vacated.get(page_no, []))
         painter.finish()
-        return _save(pdf, password if pdf.is_encrypted else "", min_version="1.4" if images else "1.3")
+        return _save(pdf, password if pdf.is_encrypted else "", min_version=min_version)
 
 
 Box = tuple[float, float, float, float]
@@ -1427,15 +1470,18 @@ def _region_unit(page: pikepdf.Page) -> float:
     return unit
 
 
-def _region_boxes(page: pikepdf.Page, regions: Sequence[RegionEdit], *, source: bool) -> None:
-    """Check each end in its own page's display frame and physical units."""
+def _region_boxes(page: pikepdf.Page, regions: Sequence[RegionEdit], *, source: bool, document: str | None = None) -> None:
+    """Check each end in its own page's display frame and physical units.
+
+    `document` names the page's file when it is not the PDF being edited.
+    """
     if not regions:
         return
     frame, width, height = _display_frame(page)
     unit = _region_unit(page)
     boxes = []
     matrix = pikepdf.Matrix(*frame)
-    number = page.index + 1
+    number = f"{page.index + 1} of {document}" if document else str(page.index + 1)
     label = "source" if source else "destination"
     for region in regions:
         box = region.source if source else (region.x, region.y, region.width, region.height)
@@ -1471,6 +1517,25 @@ def _region_original(pdf: pikepdf.Pdf, page: pikepdf.Page) -> pikepdf.Object:
     return form
 
 
+@dataclass(frozen=True)
+class _RegionSource:
+    """A frozen page that regions sample, with the frame its display coordinates are measured in."""
+
+    form: pikepdf.Object
+    matrix: tuple[float, ...]
+    height: float
+    unit: float
+
+    @classmethod
+    def of(cls, pdf: pikepdf.Pdf, page: pikepdf.Page, *, into: pikepdf.Pdf | None = None) -> "_RegionSource":
+        """Freeze `page` of `pdf`; `into` copies the result into another PDF, leaving `pdf` unchanged."""
+        form = _region_original(pdf, page)
+        if into is not None:
+            form = into.copy_foreign(form)
+        matrix, _, height = _display_frame(page)
+        return cls(form, matrix, height, _region_unit(page))
+
+
 class _Painter:
     """Draws edits onto pages, sharing fonts, images and graphics states between them."""
 
@@ -1482,7 +1547,8 @@ class _Painter:
         self.pictures: dict[int, pikepdf.Object] = {}
         self.multiply: pikepdf.Object | None = None
         self.opacities: dict[float, pikepdf.Object] = {}
-        self.region_sources: dict[int, pikepdf.Object] = {}
+        # Frozen source pages by (source PDF index, page); None is the PDF being edited.
+        self.region_sources: dict[tuple[int | None, int], _RegionSource] = {}
         # Resource names are per page, so remember what each page calls each object.
         self.names: dict[tuple[int, str], pikepdf.Name] = {}
 
@@ -1509,14 +1575,13 @@ class _Painter:
             elif isinstance(e, ImageEdit):
                 ops += self._image(page, e, height)
             elif isinstance(e, RegionEdit):
-                origin = self.pdf.pages[e.origin_page - 1]
-                source_matrix, _, source_height = _display_frame(origin)
-                source_unit = _region_unit(origin)
-                original_name = self._resource(page, f"region-original:{e.origin_page}", self.region_sources[e.origin_page], pikepdf.Name.XObject, "Region")
-                sx, sy, sw, sh = (v / source_unit for v in e.source)
+                origin = self.region_sources[(e.source_document, e.origin_page)]
+                document = "" if e.source_document is None else e.source_document
+                original_name = self._resource(page, f"region-original:{document}:{e.origin_page}", origin.form, pikepdf.Name.XObject, "Region")
+                sx, sy, sw, sh = (v / origin.unit for v in e.source)
                 x, y, w, h = (v / unit for v in (e.x, e.y, e.width, e.height))
-                source_bottom = source_height - sy - sh
-                inverse = pikepdf.Matrix(*source_matrix).inverse()
+                source_bottom = origin.height - sy - sh
+                inverse = pikepdf.Matrix(*origin.matrix).inverse()
                 # Rotate within the destination box in the displayed frame.
                 # PDF y points upward, so clockwise 90 degrees has negative b.
                 a, b, c, d, ox, oy = {

@@ -399,3 +399,16 @@ it('keeps scrolling with a held pointer and stops the frame loop when the drag i
   expect(page(1).querySelector('[data-id]')).not.toBeNull()
   expect(page(2).querySelector('[data-id]')).toBeNull()
 })
+
+it('works on one PDF: no second PDF to copy from, while Copy and Paste duplicate a region of this one', async () => {
+  expect(container.querySelector('[aria-label="PDF to copy from"]')).toBeNull()
+  expect(container.textContent).not.toContain('Copy from another PDF')
+  expect(container.textContent).not.toContain('Paste into')
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true })) })
+  await act(async () => { document.dispatchEvent(new Event('paste', { bubbles: true })) })
+  await click('Save with 2 edits')
+  const [, edits, , , sources] = mocks.edit.mock.calls.at(-1)!
+  expect(edits[1]).toMatchObject({ type: 'region', copy: true, sourcePage: 1, source: edits[0].source })
+  expect(edits[1].sourceDocument).toBeUndefined()
+  expect(sources).toEqual([])
+})

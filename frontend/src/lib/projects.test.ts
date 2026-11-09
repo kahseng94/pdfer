@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_STYLE, type Element } from './edits'
 import { DEFAULT_ORGANIZE } from './organize'
 import { pdfPassword, rememberPdfPassword } from './passwords'
-import { checkProjectPages, deleteProject, listProjects, projectError, projectFingerprint, readProject, restoreProject, saveProject, serializeProject, validateProject, type ProjectDraft } from './projects'
+import { checkProjectPages, checkSourcePages, deleteProject, listProjects, projectError, projectFingerprint, readProject, restoreProject, saveProject, serializeProject, validateProject, type ProjectDraft } from './projects'
 
 function file(name = 'source.pdf', bytes = 'original PDF bytes') { return new File([bytes], name, { type: 'application/pdf', lastModified: 42 }) }
 const text: Element = { id: 'text', type: 'text', page: 2, x: 30, y: 44, text: 'Unfinished\n你好', size: 18, color: '#123456', family: 'serif', bold: true, italic: false }
@@ -169,5 +169,74 @@ describe('local project storage', () => {
     vi.stubGlobal('indexedDB', undefined)
     await expect(listProjects()).rejects.toThrow('does not support')
     await expect(saveProject(edit(), 'Draft')).rejects.toThrow('does not support')
+  })
+})
+
+describe('Copy between PDFs projects', () => {
+  const box = { page: 1, x: 25, y: 35, width: 75, height: 20 }
+  const other = () => file('other.pdf', 'other PDF bytes')
+  function withCopies(): ProjectDraft<'copy-pdf'> {
+    const draft: ProjectDraft<'copy-pdf'> = { ...edit(), tool: 'copy-pdf' }
+    const source = other()
+    draft.state.elements.push(
+      { id: 'from-other', type: 'region', ...box, sourcePage: 2, copy: true, sourceFile: source, source: { x: 10, y: 20, width: 150, height: 40 } },
+      { id: 'from-other-again', type: 'region', ...box, page: 2, sourcePage: 1, copy: true, rotation: 90, sourceFile: source, source: { x: 0, y: 0, width: 40, height: 150 } },
+      { id: 'local-copy', type: 'region', ...box, sourcePage: 2, copy: true, source: { x: 10, y: 20, width: 150, height: 40 } },
+    )
+    return draft
+  }
+
+  it('stores each other PDF once and restores the same file object for every region that copies from it', async () => {
+    const draft = withCopies()
+    rememberPdfPassword(draft.state.elements[1].type === 'region' ? draft.state.elements[1].sourceFile! : draft.file, 'never-persist-this')
+    const content = structuredClone(serializeProject(draft))
+    expect(content.sources).toHaveLength(1)
+    expect(content.tool === 'copy-pdf' && content.state.elements.slice(1).map((el) => 'sourceDocument' in el ? el.sourceDocument : undefined)).toEqual([0, 0, undefined])
+    expect(content.tool === 'copy-pdf' && content.state.elements.some((el) => 'sourceFile' in el)).toBe(false)
+    const restored = restoreProject(content)
+    if (restored.draft.tool !== 'copy-pdf') throw new Error('Wrong tool')
+    const [, first, second, local] = restored.draft.state.elements
+    if (first.type !== 'region' || second.type !== 'region' || local.type !== 'region') throw new Error('Wrong elements')
+    expect(first.sourceFile).toBeInstanceOf(File)
+    expect(first.sourceFile).toBe(second.sourceFile)
+    expect(first.sourceFile!.name).toBe('other.pdf')
+    expect(await first.sourceFile!.text()).toBe('other PDF bytes')
+    expect(pdfPassword(first.sourceFile!)).toBe('')
+    expect(local.sourceFile).toBeUndefined()
+    expect(projectFingerprint(restored.draft.state)).toBe(projectFingerprint(draft.state))
+    const saved = await saveProject(draft, 'With copies')
+    expect(saved.size).toBe(draft.file.size + 'other PDF bytes'.length)
+    expect((await readProject(saved.id)).content.sources).toHaveLength(1)
+    restored.dispose()
+  })
+
+  it('accepts Edit projects without other PDFs, refuses Edit projects that refer to one, and rejects copies that name a missing or uncopied source', () => {
+    const content = serializeProject(withCopies())
+    if (content.tool !== 'copy-pdf') throw new Error('Wrong tool')
+    expect(() => validateProject(content)).not.toThrow()
+    // Edit works on one PDF; the same content saved as an Edit project is not valid.
+    expect(() => validateProject({ ...content, tool: 'edit' })).toThrow('damaged')
+    const { sources: _sources, ...older } = serializeProject(edit())
+    expect(() => validateProject(older)).not.toThrow()
+    const previous = restoreProject(older)
+    if (previous.draft.tool !== 'edit') throw new Error('Wrong tool')
+    expect(previous.draft.state.elements).toHaveLength(1)
+    previous.dispose()
+    const copied = content.state.elements[1]
+    for (const patch of [{ sourceDocument: 1 }, { sourceDocument: -1 }, { sourceDocument: 0.5 }, { sourceDocument: '0' }, { sourceDocument: 0, copy: undefined }, { sourceDocument: 0, copy: false }]) {
+      expect(() => validateProject({ ...content, state: { ...content.state, elements: [{ ...copied, ...patch }] } })).toThrow('damaged')
+    }
+    expect(() => validateProject({ ...content, sources: [{ blob: 'nope' }] })).toThrow('damaged')
+    expect(() => validateProject({ ...content, sources: undefined })).toThrow('damaged')
+  })
+
+  it('checks pages of the other PDF against that PDF, not the edited one', () => {
+    const draft = withCopies()
+    const source = draft.state.elements[1].type === 'region' ? draft.state.elements[1].sourceFile! : draft.file
+    expect(() => checkProjectPages(draft.state, 2)).not.toThrow()
+    expect(() => checkProjectPages(draft.state, 1)).toThrow('damaged') // the local copy's source page 2
+    expect(() => checkSourcePages(draft.state.elements, source, 2)).not.toThrow()
+    expect(() => checkSourcePages(draft.state.elements, source, 1)).toThrow('damaged')
+    expect(() => checkSourcePages(draft.state.elements, other(), 1)).not.toThrow()
   })
 })
