@@ -36,12 +36,12 @@ export function DropOverlay({ label }: { label: string }) {
 }
 
 /** A small square button holding an icon. Pressing it leaves keyboard focus where it was. */
-export function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+export function IconButton({ label, title, disabled, onClick, children }: { label: string; title?: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
       aria-label={label}
-      title={label}
+      title={title ?? label}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}

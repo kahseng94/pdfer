@@ -40,7 +40,7 @@ export const TOOL_DETAILS: Record<ToolId, { title: string; description: string }
 }
 
 export function focusToolNavigation(tool: ToolId) {
-  const tab = document.getElementById(`tab-${tool}`)
-  const target = tab?.getClientRects().length ? tab : document.getElementById('tool-picker')
+  // The first of these that is on screen: the sidebar tab, the narrow-window picker, or, with the sidebar hidden, the workspace.
+  const target = [`tab-${tool}`, 'tool-picker', 'workspace'].map((id) => document.getElementById(id)).find((node) => node?.getClientRects().length)
   target?.focus()
 }

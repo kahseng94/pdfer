@@ -81,6 +81,20 @@ export const RotateIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const ReloadIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M18.9 9a8 8 0 1 1-6.9-4" />
+    <path d="M9.5 2.5 12 5 9.5 7.5" />
+  </Icon>
+)
+
+export const SidebarIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect width="18" height="16" x="3" y="4" rx="2" />
+    <path d="M9 4v16M5.5 8h1M5.5 11h1" />
+  </Icon>
+)
+
 export const CopyIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect width="14" height="14" x="8" y="8" rx="2" />

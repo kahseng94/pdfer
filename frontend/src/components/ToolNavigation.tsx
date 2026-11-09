@@ -1,6 +1,6 @@
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { TOOLS, type ToolId } from '../lib/tools'
-import { LogoIcon } from './icons'
+import { LogoIcon, SidebarIcon } from './icons'
 
 function group(label: string, ...ids: ToolId[]) {
   return { label, tools: TOOLS.filter((tool) => ids.includes(tool.id)) }
@@ -61,12 +61,7 @@ function ToolIcon({ tool }: { tool: ToolId }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={TOOL_PATHS[tool]} /></svg>
 }
 
-export function LocalFilesNote() {
-  return <span className="local-files-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6l8-3Z" /><path d="m8 12 3 3 5-6" /></svg><span>Files stay on your computer</span></span>
-}
-
-
-export function ToolNavigation({ selected, onSelect }: { selected: ToolId; onSelect: (tool: ToolId) => void }) {
+export function ToolNavigation({ selected, onSelect, footer }: { selected: ToolId; onSelect: (tool: ToolId) => void; footer?: ReactNode }) {
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey) return
     const count = navigationTools.length
@@ -82,7 +77,7 @@ export function ToolNavigation({ selected, onSelect }: { selected: ToolId; onSel
   }
 
   return <>
-    <aside className="tool-sidebar" aria-label="PDF tools">
+    <aside id="tool-sidebar" className="tool-sidebar" aria-label="PDF tools">
       <div className="app-brand"><LogoIcon className="brand-mark" /><div><span className="brand-name">pdfer</span><p>Local PDF tools</p></div></div>
       <div className="tool-navigation" role="tablist" aria-label="Tool" aria-orientation="vertical" onKeyDown={navigate}>
         {GROUPS.map((group) => <div className="tool-group" role="presentation" key={group.label}>
@@ -100,7 +95,7 @@ export function ToolNavigation({ selected, onSelect }: { selected: ToolId; onSel
           ><ToolIcon tool={tool.id} /><span>{tool.label}</span></button>)}
         </div>)}
       </div>
-      <div className="sidebar-footer"><LocalFilesNote /></div>
+      {footer && <div className="sidebar-footer">{footer}</div>}
     </aside>
     <header className="mobile-navigation">
       <div className="mobile-brand"><LogoIcon className="brand-mark" /><span className="brand-name">pdfer</span><span className="mobile-local">Local PDF tools</span></div>
@@ -109,4 +104,12 @@ export function ToolNavigation({ selected, onSelect }: { selected: ToolId; onSel
       </select></label>
     </header>
   </>
+}
+
+/** Shows or hides the sidebar on wide windows. It sits outside the sidebar so it stays reachable while the sidebar is hidden. */
+export function SidebarToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () => void }) {
+  const label = hidden ? 'Show sidebar' : 'Hide sidebar'
+  return <button type="button" className="sidebar-toggle" aria-label={label} title={label} aria-expanded={!hidden} aria-controls="tool-sidebar" onClick={onToggle}>
+    <SidebarIcon strokeWidth={1.5} />
+  </button>
 }

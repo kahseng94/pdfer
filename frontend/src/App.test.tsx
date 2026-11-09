@@ -97,3 +97,32 @@ it('supports keyboard tabs and the compact picker without losing the selected to
     await act(async () => root.unmount()); container.remove()
   }
 })
+
+it('hides and shows the sidebar from its toggle, and remembers the choice', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const { default: App } = await import('./App')
+  const container = document.createElement('div'); document.body.append(container)
+  let root = createRoot(container)
+  const shell = () => container.querySelector<HTMLElement>('.app-shell')!
+  const toggle = () => container.querySelector<HTMLButtonElement>('.sidebar-toggle')!
+  try {
+    await act(async () => root.render(<App />))
+    expect(shell().dataset.sidebar).toBe('shown')
+    expect(toggle().getAttribute('aria-label')).toBe('Hide sidebar')
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector(`#${toggle().getAttribute('aria-controls')}`)?.tagName).toBe('ASIDE')
+    await act(async () => toggle().click())
+    expect(shell().dataset.sidebar).toBe('hidden')
+    expect(toggle().getAttribute('aria-label')).toBe('Show sidebar')
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(<App />))
+    expect(shell().dataset.sidebar).toBe('hidden')
+    await act(async () => toggle().click())
+    expect(shell().dataset.sidebar).toBe('shown')
+    expect(localStorage.getItem('pdfer.sidebar')).toBe('shown')
+  } finally {
+    await act(async () => root.unmount()); container.remove()
+  }
+})

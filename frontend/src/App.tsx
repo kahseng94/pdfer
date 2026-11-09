@@ -4,7 +4,8 @@ import { loadTool, saveTool } from './lib/lastTool'
 import { TOOL_IDS, type ToolId } from './lib/tools'
 import { CompressTool } from './components/CompressTool'
 import { EditTool } from './components/EditTool'
-import { LocalFilesNote, ToolNavigation } from './components/ToolNavigation'
+import { SidebarToggle, ToolNavigation } from './components/ToolNavigation'
+import { loadSidebarHidden, saveSidebarHidden } from './lib/sidebarPreference'
 import { focusToolNavigation, TOOL_DETAILS } from './lib/toolNavigation'
 import { ImagesTool } from './components/ImagesTool'
 import { OfficeTool } from './components/OfficeTool'
@@ -37,19 +38,28 @@ import { FormsTool } from './components/FormsTool'
 import { RedactTool } from './components/RedactTool'
 import { ProjectsPanel } from './components/ProjectsPanel'
 import { ProjectContext, useProjectManager } from './lib/useProject'
-import { DesktopUpdates } from './components/DesktopControls'
+import { CheckForUpdatesButton, DesktopUpdates } from './components/DesktopControls'
+import { useDesktopUpdates } from './lib/useDesktopUpdates'
 
 const CompareTool = lazy(() => import('./components/CompareTool').then((module) => ({ default: module.CompareTool })))
 
 export default function App() {
   const [tool, setTool] = useState<ToolId>(() => loadTool(TOOL_IDS, 'merge'))
   const [delivery, setDelivery] = useState<Delivery | null>(null)
+  const [sidebarHidden, setSidebarHidden] = useState(loadSidebarHidden)
 
   function select(id: ToolId) {
     setTool(id)
     saveTool(id)
   }
   const projects = useProjectManager(select)
+
+  function toggleSidebar() {
+    setSidebarHidden(!sidebarHidden)
+    saveSidebarHidden(!sidebarHidden)
+  }
+  const updates = useDesktopUpdates()
+  const checkForUpdates = updates && <CheckForUpdatesButton updates={updates} />
 
   function send(to: ToolId, file: File) {
     setDelivery((prev) => ({ to, file, id: (prev?.id ?? 0) + 1 }))
@@ -62,12 +72,13 @@ export default function App() {
   return (
     <HandoffContext value={{ delivery, send }}>
       <ProjectContext value={projects}>
-        <div className="app-shell">
+        <div className="app-shell" data-sidebar={sidebarHidden ? 'hidden' : 'shown'}>
           <div className="title-bar" aria-hidden="true" />
           <a className="skip-link" href="#workspace">Skip to workspace</a>
-          <ToolNavigation selected={tool} onSelect={select} />
+          <SidebarToggle hidden={sidebarHidden} onToggle={toggleSidebar} />
+          <ToolNavigation selected={tool} onSelect={select} footer={checkForUpdates} />
           <main id="workspace" tabIndex={-1} className={`workspace ${tool === 'compare' || tool === 'copy-pdf' ? 'workspace-wide' : ''}`}>
-            <DesktopUpdates />
+            <DesktopUpdates updates={updates} />
             <ProjectsPanel />
             <header className="workspace-heading">
               <h1>{TOOL_DETAILS[tool].title}</h1>
@@ -175,7 +186,8 @@ export default function App() {
             <section id="panel-photo" role="tabpanel" aria-labelledby="tab-photo" hidden={tool !== 'photo'}>
               <PhotoTool active={tool === 'photo'} />
             </section>
-            <footer className="workspace-footer"><LocalFilesNote /></footer>
+            {/* Narrow windows hide the sidebar, so its footer moves to the end of the workspace. */}
+            {checkForUpdates && <footer className="workspace-footer">{checkForUpdates}</footer>}
           </main>
           <PdfPasswordDialog />
         </div>
