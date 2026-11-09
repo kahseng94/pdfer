@@ -1,6 +1,6 @@
 {
   "name": "pdfer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Private, local PDF tools for your desktop",
   "author": "Jayson Ng",
   "main": "desktop/start.cjs",
